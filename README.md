@@ -264,7 +264,7 @@ npm run dev
 
 ## 📄 License
 
-MIT License — see [LICENSE](LICENSE) for details.
+All Rights Reserved — see [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgments
 
