@@ -1,0 +1,78 @@
+/* TextWidget — Themed markdown rendering */
+
+.textwidget-container {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px 18px;
+  box-sizing: border-box;
+  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--color-text, #f3f4f6);
+}
+
+/* Headings */
+.textwidget-h1 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-text, #f3f4f6);
+  margin: 0 0 10px;
+}
+
+.textwidget-h2 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--color-text, #f3f4f6);
+  margin: 8px 0 6px;
+}
+
+.textwidget-h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text, #f3f4f6);
+  margin: 6px 0 4px;
+}
+
+/* Bold and italic */
+.textwidget-bold {
+  color: var(--color-accent, #ff6200);
+  font-weight: 700;
+}
+
+.textwidget-italic {
+  color: var(--color-text-muted, #9ca3af);
+  font-style: italic;
+}
+
+/* Inline code */
+.textwidget-code {
+  background: var(--color-code-bg, #1a1d25);
+  color: var(--color-accent, #ff6200);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+}
+
+/* Paragraph */
+.textwidget-p {
+  margin: 0 0 6px;
+  color: var(--color-text, #f3f4f6);
+}
+
+/* Lists */
+.textwidget-ul {
+  margin: 4px 0 6px;
+  padding-left: 18px;
+}
+
+.textwidget-ol {
+  margin: 4px 0 6px;
+  padding-left: 18px;
+}
+
+.textwidget-li {
+  margin-bottom: 2px;
+  color: var(--color-text, #f3f4f6);
+}

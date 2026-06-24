@@ -1,3 +1,12 @@
+/**
+ * TextWidget — Renders markdown text blocks on the canvas.
+ *
+ * Uses CSS variables for theming instead of hardcoded colors.
+ * This ensures text is readable in both dark and light modes.
+ */
+
+import './TextWidget.css';
+
 export type TextWidgetData = {
   content: string;
 };
@@ -12,16 +21,15 @@ function renderMarkdown(raw: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   let key = 0;
 
-  // Inline: **bold**, *italic*, `code`
   function renderInline(text: string): React.ReactNode[] {
     const parts: React.ReactNode[] = [];
     const re = /(\*\*(.+?)\*\*)|(\*(.+?)\*)|(`(.+?)`)/g;
     let last = 0, m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
       if (m.index > last) parts.push(text.slice(last, m.index));
-      if (m[1]) parts.push(<strong key={key++} style={{ color: '#ffc800', fontWeight: 700 }}>{m[2]}</strong>);
-      else if (m[3]) parts.push(<em key={key++} style={{ color: '#b0c8ff', fontStyle: 'italic' }}>{m[4]}</em>);
-      else if (m[5]) parts.push(<code key={key++} style={{ background: '#1e1e1e', color: '#ffc800', borderRadius: 3, padding: '1px 5px', fontSize: 12, fontFamily: 'monospace' }}>{m[6]}</code>);
+      if (m[1]) parts.push(<strong key={key++} className="textwidget-bold">{m[2]}</strong>);
+      else if (m[3]) parts.push(<em key={key++} className="textwidget-italic">{m[4]}</em>);
+      else if (m[5]) parts.push(<code key={key++} className="textwidget-code">{m[6]}</code>);
       last = m.index + m[0].length;
     }
     if (last < text.length) parts.push(text.slice(last));
@@ -34,76 +42,52 @@ function renderMarkdown(raw: string): React.ReactNode[] {
     const trimmed = line.trimEnd();
 
     if (trimmed === '') {
-      // blank line — skip (spacing handled by margins)
       i++;
       continue;
     }
 
-    // Headings
     const h3 = trimmed.match(/^###\s+(.*)/);
     const h2 = trimmed.match(/^##\s+(.*)/);
     const h1 = trimmed.match(/^#\s+(.*)/);
-    if (h1) { nodes.push(<h1 key={key++} style={{ fontSize: 20, fontWeight: 700, color: '#fff', margin: '0 0 10px' }}>{renderInline(h1[1])}</h1>); i++; continue; }
-    if (h2) { nodes.push(<h2 key={key++} style={{ fontSize: 17, fontWeight: 700, color: '#f0f0f0', margin: '8px 0 6px' }}>{renderInline(h2[1])}</h2>); i++; continue; }
-    if (h3) { nodes.push(<h3 key={key++} style={{ fontSize: 15, fontWeight: 700, color: '#e8e8e8', margin: '6px 0 4px' }}>{renderInline(h3[1])}</h3>); i++; continue; }
+    if (h1) { nodes.push(<h1 key={key++} className="textwidget-h1">{renderInline(h1[1])}</h1>); i++; continue; }
+    if (h2) { nodes.push(<h2 key={key++} className="textwidget-h2">{renderInline(h2[1])}</h2>); i++; continue; }
+    if (h3) { nodes.push(<h3 key={key++} className="textwidget-h3">{renderInline(h3[1])}</h3>); i++; continue; }
 
-    // List items — collect a run of them into a <ul>
     if (/^\s*[-*]\s/.test(trimmed)) {
       const items: React.ReactNode[] = [];
       while (i < lines.length && /^\s*[-*]\s/.test(lines[i].trimEnd())) {
         const itemLine = lines[i];
-        const indent = itemLine.match(/^(\s*)/)?.[1].length ?? 0;
         const text = itemLine.replace(/^\s*[-*]\s/, '');
         items.push(
-          <li key={key++} style={{ marginBottom: 2, paddingLeft: indent > 0 ? 12 : 0, color: '#e0e0e0', listStyleType: indent > 0 ? 'circle' : 'disc' }}>
-            {renderInline(text)}
-          </li>
+          <li key={key++} className="textwidget-li">{renderInline(text)}</li>
         );
         i++;
       }
-      nodes.push(<ul key={key++} style={{ margin: '4px 0 6px', paddingLeft: 18 }}>{items}</ul>);
+      nodes.push(<ul key={key++} className="textwidget-ul">{items}</ul>);
       continue;
     }
 
-    // Ordered list items
     if (/^\d+\.\s/.test(trimmed)) {
       const items: React.ReactNode[] = [];
       while (i < lines.length && /^\d+\.\s/.test(lines[i].trimEnd())) {
         const text = lines[i].replace(/^\d+\.\s/, '');
-        items.push(<li key={key++} style={{ marginBottom: 2, color: '#e0e0e0' }}>{renderInline(text)}</li>);
+        items.push(<li key={key++} className="textwidget-li">{renderInline(text)}</li>);
         i++;
       }
-      nodes.push(<ol key={key++} style={{ margin: '4px 0 6px', paddingLeft: 18 }}>{items}</ol>);
+      nodes.push(<ol key={key++} className="textwidget-ol">{items}</ol>);
       continue;
     }
 
-    // Plain paragraph
-    nodes.push(<p key={key++} style={{ margin: '0 0 6px', color: '#e0e0e0' }}>{renderInline(trimmed)}</p>);
+    nodes.push(<p key={key++} className="textwidget-p">{renderInline(trimmed)}</p>);
     i++;
   }
 
   return nodes;
 }
 
-/**
- * TextWidget — Renders markdown text blocks.
- * 
- * Used by the agent to display structured text, summaries,
- * key points, and step-by-step breakdowns.
- */
 export function TextWidget({ data }: { data: TextWidgetData }) {
   return (
-    <div style={{
-      width: '100%',
-      height: '100%',
-      overflowY: 'auto',
-      padding: '16px 18px',
-      boxSizing: 'border-box',
-      fontFamily: 'sans-serif',
-      fontSize: 15,
-      lineHeight: 1.7,
-      color: '#e0e0e0',
-    }}>
+    <div className="textwidget-container">
       {renderMarkdown(data.content)}
     </div>
   );
