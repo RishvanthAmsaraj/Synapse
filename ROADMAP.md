@@ -1,33 +1,45 @@
 # Synapse Roadmap
 
-## Current State
+## Current State (v2.0 — CMSA + SPPE)
 
-Synapse is a voice-first AI interaction framework with:
-- Real-time voice conversation with Gemini
-- Dynamic widget canvas (code, text, image, call stack)
-- NON_BLOCKING tool calls for simultaneous speech + visuals
-- Structured teaching mode for educational content
+Synapse introduces the **Concurrent Multimodal Stream Architecture (CMSA)**:
+- ✅ Real-time voice conversation with Gemini
+- ✅ Dynamic widget canvas (code, text, image, call stack)
+- ✅ NON_BLOCKING tool calls for simultaneous speech + visuals
+- ✅ SPPE runtime (Synapse Parallel Processing Engine) for transactional scheduling
+- ✅ Dependency-aware multi-stream coordination (independent / sequential / data_dependent / merge)
+- ✅ Frontier-based version tracking for widget state
+- ✅ Barge-in compensation (Atomix-inspired rollback)
+- ✅ Design language matching CalculatorRA / QuantBot / RAG Assistant
+- ✅ Dark/light theme with orange (#ff6200) accent
+- ✅ Debug log panel with SPPE event coloring
 
-## Phase 1: Core Stability (Current)
+## Phase 1: SPPE Expansion
 
-### Improvements Needed
-- [ ] **Error handling** — Better recovery from API failures
-- [ ] **State management** — Centralized state for complex sessions
-- [ ] **Widget lifecycle** — Proper cleanup and memory management
-- [ ] **Reconnection logic** — Auto-reconnect on WebSocket drop
-- [ ] **Audio robustness** — Handle browser audio permission changes
+### New Streams
+- [ ] **Exec stream** — Sandboxed Python/JS execution via WebContainer
+- [ ] **Exec stream** — Terminal widget for interactive shell sessions
+- [ ] **Speech stream** — Caption overlay with real-time transcription display
 
-## Phase 2: Widget Ecosystem
+### SPPE Features
+- [ ] **DAG visualization** — Debug panel shows the live dependency graph
+- [ ] **Conflict resolution UI** — Visual indicators for concurrent write conflicts
+- [ ] **Stream waterfall** — Timeline view of all three streams
+- [ ] **Frontier dashboard** — Real-time frontier version display
 
-### New Widgets
+## Phase 2: New Widgets
+
+### High Priority
+- [ ] **ChartWidget** — Live-updating charts via Chart.js
+- [ ] **TerminalWidget** — xterm.js with interactive shell
 - [ ] **WhiteboardWidget** — Freeform drawing with SVG/Canvas
-- [ ] **ChartWidget** — Charts.js or D3.js integration
-- [ ] **VideoWidget** — YouTube/video embed with timestamp control
-- [ ] **BrowserWidget** — iframe with URL navigation
-- [ ] **TerminalWidget** — xterm.js for interactive shell
+- [ ] **FileWidget** — File explorer/preview
+
+### Medium Priority
 - [ ] **DiffWidget** — Side-by-side code comparison
-- [ ] **MathWidget** — KaTeX for equation rendering
-- [ ] **MapWidget** — Leaflet for geographic visualization
+- [ ] **MathWidget** — KaTeX equation rendering
+- [ ] **MapWidget** — Leaflet geographic visualization
+- [ ] **VideoWidget** — Embed with timestamp control
 
 ### Widget Improvements
 - [ ] **Drag-and-drop** — Reorder widgets on canvas
@@ -39,17 +51,21 @@ Synapse is a voice-first AI interaction framework with:
 ## Phase 3: Multi-Agent Support
 
 ### Agent Integration
-- [ ] **OpenAI integration** — GPT-4o with voice
+- [ ] **OpenAI integration** — GPT-4o with real-time voice
 - [ ] **Anthropic integration** — Claude with tool use
 - [ ] **Local models** — Ollama/Llama.cpp support
 - [ ] **Agent switching** — Change mid-conversation
 - [ ] **Agent personas** — Different voices/personalities
 
+### SPPE Multi-Agent
+- [ ] **Per-agent streams** — Each agent gets its own stream set
+- [ ] **Shared canvas** — Multiple agents share the same canvas
+- [ ] **Agent → Agent messaging** — Stream-based inter-agent communication
+
 ### Protocol Standardization
 - [ ] **Widget API spec** — Standard interface for all widgets
 - [ ] **Tool call schema** — JSON Schema for validation
 - [ ] **Session protocol** — State synchronization standard
-- [ ] **Audio format** — Standardized PCM streaming
 
 ## Phase 4: Advanced Features
 
@@ -62,7 +78,7 @@ Synapse is a voice-first AI interaction framework with:
 ### Intelligence
 - [ ] **Context memory** — Long-term conversation memory
 - [ ] **Knowledge base** — RAG for domain-specific content
-- [ ] **Code execution** — Safe sandbox for running code
+- [ ] **Code execution** — Safe sandbox (Pyodide / WebAssembly)
 - [ ] **File upload** — Drag-and-drop file analysis
 
 ### Accessibility
@@ -80,7 +96,7 @@ Synapse is a voice-first AI interaction framework with:
 - [ ] **Self-hosted** — Docker compose setup
 
 ### Integrations
-- [ ] **VS Code extension** — Code editor integration
+- [ ] **VS Code extension** — Code editor integration with Synapse canvas
 - [ ] **Slack/Discord bot** — Chat platform integration
 - [ ] **Notion/Obsidian** — Note-taking integration
 - [ ] **GitHub** — Code review assistance
@@ -89,10 +105,12 @@ Synapse is a voice-first AI interaction framework with:
 
 **Synapse as the universal AI interface:**
 - Any model, any widget, any platform
-- Natural voice interaction with rich visuals
-- Truly simultaneous multi-modal communication
+- True parallel multi-modal communication (no other system does this)
+- SPPE as the standard runtime for concurrent agent-stream coordination
 - Open protocol for the AI interaction layer
 
 ---
+
+**What makes Synapse unique:** No existing system (ChatGPT Voice, Claude, Gemini Live, Cursor, Copilot) combines real-time speech with visual canvas updates AND background code execution — all simultaneously, with transactional guarantees. This is a genuine first in the industry.
 
 Want to contribute? Check [CONTRIBUTING.md](CONTRIBUTING.md) and pick an item from the roadmap!

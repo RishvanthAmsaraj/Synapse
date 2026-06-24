@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CanvasProvider, useCanvas } from './canvas/CanvasProvider';
 import { Canvas } from './canvas/Canvas';
+import { SPPE, type SPPEStreamEvent } from './sppe/SPPE';
+
 import { useLiveSession, type ToolCall } from './hooks/useLiveSession';
 import { useAudioIO } from './hooks/useAudioIO';
 import { useAudioPlayback } from './hooks/useAudioPlayback';
@@ -42,7 +44,6 @@ function AppInner() {
   // Staggered highlight state
   const pendingTimersRef        = useRef<ReturnType<typeof setTimeout>[]>([]);
   const pendingHighlightCountRef = useRef(0);
-  // Set true when interrupt clears highlights — injected into canvas state so model re-issues them
   const highlightsClearedRef = useRef(false);
 
   // Always-current canvas inventory for turn_complete injection
@@ -57,8 +58,29 @@ function AppInner() {
   const callStackDataRef = useRef<CallStackData>({ frames: [], overflow: false });
   const frameCounterRef  = useRef(0);
 
+  // ── SPPE Runtime ──────────────────────────────────────────────
+  const sppeRef = useRef<SPPE | null>(null);
+
+  useEffect(() => {
+    const sppe = new SPPE({
+      onSchedule: (event: SPPEStreamEvent) => {
+        addLog(`sppe:stream=${event.stream} action=${event.actionId} resolved=${event.resolvedOrder}`);
+      },
+      onCommit: (event: SPPEStreamEvent) => {
+        addLog(`sppe:commit stream=${event.stream} action=${event.actionId}`);
+      },
+      onRollback: (event: SPPEStreamEvent) => {
+        addLog(`sppe:ROLLBACK stream=${event.stream} action=${event.actionId}`);
+      },
+      onConflict: (event: SPPEStreamEvent) => {
+        addLog(`sppe:CONFLICT stream=${event.stream} action=${event.actionId} → last-writer-wins`);
+      },
+    });
+    sppeRef.current = sppe;
+    return () => { sppe.dispose(); };
+  }, [addLog]);
+
   // Cancel all pending highlight timers and reset the counter.
-  // Called on new code_viewer_show, interrupt, and stop.
   function clearPendingHighlights() {
     for (const t of pendingTimersRef.current) clearTimeout(t);
     pendingTimersRef.current = [];
@@ -72,6 +94,35 @@ function AppInner() {
         : call.args
       )}`);
 
+      // Route through SPPE for dependency tracking
+      const sppe = sppeRef.current;
+      if (sppe) {
+        switch (call.name) {
+          case 'code_viewer_show':
+            sppe.schedule('widget', call.name, call.args, { type: 'independent' });
+            break;
+          case 'code_viewer_next_highlight':
+            sppe.schedule('widget', call.name, call.args, {
+              type: 'sequential',
+              dependsOn: ['code_viewer_show'],
+            });
+            break;
+          case 'image_show':
+            sppe.schedule('widget', call.name, call.args, { type: 'independent' });
+            break;
+          case 'text_show':
+            sppe.schedule('widget', call.name, call.args, { type: 'independent' });
+            break;
+          case 'call_stack_show':
+          case 'call_stack_push':
+          case 'call_stack_pop':
+          case 'call_stack_overflow':
+          case 'call_stack_remove':
+            sppe.schedule('widget', call.name, call.args, { type: 'sequential', dependsOn: ['call_stack_show'] });
+            break;
+        }
+      }
+
       switch (call.name) {
 
         // ── Code Viewer ──────────────────────────────────────────────
@@ -79,12 +130,10 @@ function AppInner() {
           const { language, code } = call.args as { language: string; code: string };
           clearPendingHighlights();
           highlightsClearedRef.current = false;
-          // Normalize literal escape sequences the model sometimes sends instead of real characters
           const normalizedCode = code.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
           const data: CodeViewerData = { language, code: normalizedCode };
           codeViewerDataRef.current = data;
           if (codeViewerIdRef.current) {
-            // Replace existing code viewer in place — don't create a second widget
             updateWidget(codeViewerIdRef.current, data);
           } else {
             const id = addWidget('code_viewer', data, 2, 2);
@@ -99,15 +148,12 @@ function AppInner() {
           if (!start_line || !end_line || start_line <= 0 || end_line <= 0) break;
           highlightsClearedRef.current = false;
 
-          // Schedule this highlight with increasing delay so batched calls
-          // cascade one-at-a-time while the agent speaks.
           const delay = HIGHLIGHT_INITIAL_DELAY + pendingHighlightCountRef.current * HIGHLIGHT_INTERVAL;
           pendingHighlightCountRef.current += 1;
 
           const timerId = setTimeout(() => {
-            // Remove this timer from the list
             pendingTimersRef.current = pendingTimersRef.current.filter((t) => t !== timerId);
-            if (!codeViewerIdRef.current) return; // widget was cleared (e.g. interrupt)
+            if (!codeViewerIdRef.current) return;
             const updated: CodeViewerData = {
               ...codeViewerDataRef.current,
               highlight: { start: start_line, end: end_line },
@@ -123,7 +169,7 @@ function AppInner() {
         // ── Image ────────────────────────────────────────────────────
         case 'image_show': {
           const { query, url } = call.args as { query: string; url: string | null };
-          if (!url) break; // backend fetch failed — skip widget silently
+          if (!url) break;
           const data: ImageWidgetData = { query, url };
           if (imageWidgetIdRef.current) {
             updateWidget(imageWidgetIdRef.current, data);
@@ -208,27 +254,36 @@ function AppInner() {
   const { connect, disconnect, sendAudio, sendContext, status } = useLiveSession({
     onAudioChunk: (base64) => playChunk(base64),
     onInterrupted: () => {
-      addLog('interrupted → flush audio, cancel highlights (canvas kept)');
+      addLog('interrupted → SPPE rollback, flush audio, cancel highlights');
       flush();
       clearPendingHighlights();
-      // Clear the active highlight band so stale highlights don't linger after a barge-in
-      if (codeViewerIdRef.current) {
-        const cleared: CodeViewerData = { language: codeViewerDataRef.current.language, code: codeViewerDataRef.current.code };
-        codeViewerDataRef.current = cleared;
-        updateWidget(codeViewerIdRef.current, cleared);
-        // Signal to the model (via next turn_complete injection) that it must re-issue highlights
-        highlightsClearedRef.current = true;
+
+      // SPPE rollback: notify runtime, revert widgets to last committed state
+      const sppe = sppeRef.current;
+      if (sppe) {
+        sppe.handleInterrupt();
+        // Check if code viewer needs rollback
+        if (codeViewerIdRef.current) {
+          const cleared: CodeViewerData = {
+            language: codeViewerDataRef.current.language,
+            code: codeViewerDataRef.current.code,
+          };
+          codeViewerDataRef.current = cleared;
+          updateWidget(codeViewerIdRef.current, cleared);
+          highlightsClearedRef.current = true;
+        }
       }
     },
     onToolCall: handleToolCall,
     onTurnComplete: () => {
       const inv = inventoryRef.current();
-      // Fire the highlights-cleared note once, then reset — no need to repeat every turn
+      const sppe = sppeRef.current;
+      const depInfo = sppe ? ` | sppe:${sppe.getStatus()}` : '';
       const note = highlightsClearedRef.current && codeViewerIdRef.current
         ? ' | highlights cleared — re-call code_viewer_next_highlight for each section on your next turn'
         : '';
       if (note) highlightsClearedRef.current = false;
-      addLog(`turn_complete → canvas:${inv || 'empty'}${note}`);
+      addLog(`turn_complete → canvas:${inv || 'empty'}${note}${depInfo}`);
       sendContext(`[canvas: ${inv}${note}]`);
     },
   });
@@ -273,11 +328,33 @@ function AppInner() {
   const canStart = status === 'disconnected' && !isRecording;
   const canStop = isRecording || status === 'connected';
 
+  // Theme toggle
+  useEffect(() => {
+    const btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    const html = document.documentElement;
+    const updateBtn = () => {
+      btn.textContent = html.getAttribute('data-theme') === 'dark' ? 'Light' : 'Dark';
+    };
+    updateBtn();
+    btn.addEventListener('click', () => {
+      const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      updateBtn();
+    });
+  }, []);
+
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Synapse</h1>
-        <div className={`status-dot status-${status}`} title={status} />
+        <div className="brand">
+          <div className="brand-mark" aria-hidden="true">S</div>
+          <span>Synapse</span>
+          <div className={`status-dot status-${status}`} title={status} />
+        </div>
+        <div className="app-toolbar">
+          <button className="toolbar-btn" id="theme-toggle" type="button">Light</button>
+        </div>
       </header>
 
       <main className="app-main">
@@ -318,32 +395,63 @@ function LogPanel({ logs }: { logs: string[] }) {
     }
   }, [logs, open]);
 
+  function getLogStyle(log: string): React.CSSProperties {
+    const base: React.CSSProperties = { whiteSpace: 'pre-wrap', lineHeight: 1.6 };
+    if (log.includes('sppe:')) {
+      if (log.includes('ROLLBACK')) base.color = '#f87171';
+      else if (log.includes('CONFLICT')) base.color = '#fbbf24';
+      else if (log.includes('commit')) { base.color = '#34d399'; base.opacity = 0.8; }
+      else base.color = '#93c5fd';
+    } else if (log.includes('turn_complete')) {
+      base.color = '#a78bfa';
+    }
+    return base;
+  }
+
   return (
-    <div style={{
-      position: 'fixed', bottom: 12, right: 12, width: 420, zIndex: 9999,
-      background: '#0d0d0d', border: '1px solid #333', borderRadius: 6,
-      fontFamily: 'monospace', fontSize: 11, color: '#a0ffa0',
-      boxShadow: '0 4px 16px rgba(0,0,0,0.6)',
+    <div className="debug-panel" style={{
+      position: 'fixed', bottom: 12, right: 12, width: 440, zIndex: 9999,
+      background: 'var(--color-surface, #181b22)',
+      border: '1px solid var(--color-border, #2a2f3a)',
+      borderRadius: 10,
+      color: 'var(--color-text, #f3f4f6)',
+      boxShadow: 'var(--color-shadow-lg, 0 16px 40px rgba(0,0,0,0.5))',
+      fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
+      fontSize: 11,
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '4px 8px', borderBottom: open ? '1px solid #333' : 'none',
-        cursor: 'pointer', userSelect: 'none', color: '#888',
+        padding: '6px 10px',
+        borderBottom: open ? '1px solid var(--color-border, #2a2f3a)' : 'none',
+        cursor: 'pointer', userSelect: 'none',
+        color: 'var(--color-text-muted, #9ca3af)',
+        fontWeight: 600,
+        fontSize: 11,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
       }} onClick={() => setOpen(o => !o)}>
         <span>debug log ({logs.length})</span>
         <div style={{ display: 'flex', gap: 6 }}>
           <button
             onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(logs.join('\n')); }}
-            style={{ fontSize: 10, background: '#222', color: '#ccc', border: '1px solid #444', cursor: 'pointer', borderRadius: 3, padding: '1px 6px' }}
+            style={{
+              fontSize: 10, background: 'var(--color-surface-2, #1f232b)',
+              color: 'var(--color-text-muted, #9ca3af)',
+              border: '1px solid var(--color-border, #2a2f3a)',
+              cursor: 'pointer', borderRadius: 6, padding: '2px 8px',
+              fontFamily: 'inherit',
+            }}
           >copy</button>
           <span>{open ? '▼' : '▲'}</span>
         </div>
       </div>
       {open && (
-        <div ref={bodyRef} style={{ maxHeight: 200, overflowY: 'auto', padding: '4px 8px' }}>
+        <div ref={bodyRef} style={{ maxHeight: 200, overflowY: 'auto', padding: '4px 10px' }}>
           {logs.length === 0
-            ? <div style={{ color: '#555' }}>no events yet</div>
-            : logs.map((l, i) => <div key={i} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{l}</div>)
+            ? <div style={{ color: 'var(--color-text-muted, #9ca3af)', opacity: 0.5 }}>no events yet</div>
+            : logs.map((log, i) => (
+                <div key={i} style={getLogStyle(log)}>{log}</div>
+              ))
           }
         </div>
       )}

@@ -2,33 +2,35 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  border-radius: 8px;
-  border: 1px solid #2a2a2a;
+  border-radius: 0;
   overflow: hidden;
 }
 
 .code-viewer-header {
-  background: #1a1a1a;
-  padding: 6px 14px;
-  border-bottom: 1px solid #2a2a2a;
   display: flex;
   align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border, #2a2f3a);
+  background: var(--color-surface-2, #1f232b);
+  flex-shrink: 0;
 }
 
 .code-viewer-lang {
-  font-size: 0.7rem;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-accent, #ff6200);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #666;
+  letter-spacing: 0.06em;
 }
 
 .code-viewer-body {
   flex: 1;
-  overflow: hidden;
+  overflow: auto;
   min-height: 0;
 }
 
 .code-viewer-body > pre {
   height: 100% !important;
   margin: 0 !important;
+  border-radius: 0 !important;
 }
