@@ -4,6 +4,7 @@ import { CodeViewer, type CodeViewerData } from '../widgets/CodeViewer';
 import { CallStack, type CallStackData } from '../widgets/CallStack';
 import { ImageWidget, type ImageWidgetData } from '../widgets/ImageWidget';
 import { TextWidget, type TextWidgetData } from '../widgets/TextWidget';
+import { TerminalWidget, type TerminalWidgetData } from '../widgets/TerminalWidget';
 import './Canvas.css';
 
 /**
@@ -71,6 +72,8 @@ function renderWidget(type: string, data: unknown) {
       return <ImageWidget data={data as ImageWidgetData} />;
     case 'text':
       return <TextWidget data={data as TextWidgetData} />;
+    case 'terminal':
+      return <TerminalWidget data={data as TerminalWidgetData} />;
     default:
       console.warn(`[Canvas] Unknown widget type: "${type}"`);
       return null;

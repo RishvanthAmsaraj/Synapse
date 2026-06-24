@@ -46,6 +46,17 @@ const REGISTRY: Record<string, ToolSpec> = {
   },
 
   // Call Stack — BOXED (disabled, component preserved)
+
+  // Execution Stream
+  exec_python: {
+    args: {
+      code:        { type: 'string', required: true },
+      description: { type: 'string', required: true },
+    },
+  },
+  exec_clear: {
+    args: {},
+  },
 };
 
 export interface ValidatedCall {

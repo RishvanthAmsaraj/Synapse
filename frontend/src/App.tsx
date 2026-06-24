@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CanvasProvider, useCanvas } from './canvas/CanvasProvider';
 import { Canvas } from './canvas/Canvas';
 import { SPPE, type SPPEStreamEvent } from './sppe/SPPE';
+import { SPPEDebugProvider, DAGVis, StreamWaterfall, FrontierDashboard, useSPPEDebug } from './sppe/SPPEDebug';
 
 import { useLiveSession, type ToolCall } from './hooks/useLiveSession';
 import { useAudioIO } from './hooks/useAudioIO';
@@ -10,6 +11,7 @@ import type { CodeViewerData } from './widgets/CodeViewer';
 import type { CallStackData } from './widgets/CallStack';
 import type { ImageWidgetData } from './widgets/ImageWidget';
 import type { TextWidgetData } from './widgets/TextWidget';
+import type { TerminalWidgetData, ExecBlock } from './widgets/TerminalWidget';
 import './App.css';
 
 // Staggered highlight timing: first fires after a short pause,
@@ -21,7 +23,9 @@ const HIGHLIGHT_INTERVAL      = 3500;  // ms between subsequent highlights
 export default function App() {
   return (
     <CanvasProvider>
-      <AppInner />
+      <SPPEDebugProvider>
+        <AppInner />
+      </SPPEDebugProvider>
     </CanvasProvider>
   );
 }
@@ -29,6 +33,7 @@ export default function App() {
 function AppInner() {
   const { addWidget, removeWidget, updateWidget, clearWidgets, getInventoryString } = useCanvas();
   const { playChunk, flush, stop } = useAudioPlayback();
+  const { pushEvent, pushConflict, setFrontier, events, frontiers, conflicts } = useSPPEDebug();
 
   // Debug log panel
   const [logs, setLogs] = useState<string[]>([]);
@@ -58,6 +63,11 @@ function AppInner() {
   const callStackDataRef = useRef<CallStackData>({ frames: [], overflow: false });
   const frameCounterRef  = useRef(0);
 
+  // Exec stream refs
+  const execTerminalIdRef = useRef<string | null>(null);
+  const execTerminalDataRef = useRef<TerminalWidgetData>({ blocks: [] });
+  const execBlockCounterRef = useRef(0);
+
   // ── SPPE Runtime ──────────────────────────────────────────────
   const sppeRef = useRef<SPPE | null>(null);
 
@@ -65,15 +75,21 @@ function AppInner() {
     const sppe = new SPPE({
       onSchedule: (event: SPPEStreamEvent) => {
         addLog(`sppe:stream=${event.stream} action=${event.actionId} resolved=${event.resolvedOrder}`);
+        pushEvent(event);
+        setFrontier(event.stream, event.resolvedOrder);
       },
       onCommit: (event: SPPEStreamEvent) => {
         addLog(`sppe:commit stream=${event.stream} action=${event.actionId}`);
+        pushEvent({ ...event });
+        setFrontier(event.stream, event.resolvedOrder);
       },
       onRollback: (event: SPPEStreamEvent) => {
         addLog(`sppe:ROLLBACK stream=${event.stream} action=${event.actionId}`);
+        pushConflict(event.actionId, false);
       },
       onConflict: (event: SPPEStreamEvent) => {
         addLog(`sppe:CONFLICT stream=${event.stream} action=${event.actionId} → last-writer-wins`);
+        pushConflict(event.actionId, true);
       },
     });
     sppeRef.current = sppe;
@@ -119,6 +135,10 @@ function AppInner() {
           case 'call_stack_overflow':
           case 'call_stack_remove':
             sppe.schedule('widget', call.name, call.args, { type: 'sequential', dependsOn: ['call_stack_show'] });
+            break;
+          case 'exec_python':
+          case 'exec_clear':
+            sppe.schedule('exec', call.name, call.args, { type: 'independent' });
             break;
         }
       }
@@ -246,9 +266,65 @@ function AppInner() {
           callStackDataRef.current = { frames: [], overflow: false };
           break;
         }
+
+        // ── Exec Stream ──────────────────────────────────────────────
+        case 'exec_python': {
+          const { code, description } = call.args as { code: string; description: string };
+          const normalizedCode = code.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+
+          // Create or update terminal widget
+          execBlockCounterRef.current += 1;
+          const blockId = `exec_${execBlockCounterRef.current}`;
+          const newBlock: ExecBlock = {
+            id: blockId,
+            code: normalizedCode,
+            description,
+            status: 'running',
+          };
+
+          const currentData = execTerminalDataRef.current;
+          const updatedBlocks = [...currentData.blocks, newBlock];
+          const data: TerminalWidgetData = { blocks: updatedBlocks };
+          execTerminalDataRef.current = data;
+
+          if (execTerminalIdRef.current) {
+            updateWidget(execTerminalIdRef.current, data);
+          } else {
+            const id = addWidget('terminal', data, 2, 2);
+            execTerminalIdRef.current = id;
+          }
+
+          // Simulate async execution — in production this calls the backend
+          // For now, show the code and mark as done after a brief delay
+          setTimeout(() => {
+            const current = execTerminalDataRef.current;
+            const updated = {
+              blocks: current.blocks.map(b =>
+                b.id === blockId
+                  ? { ...b, status: 'done' as const, output: 'Execution simulation — sandboxed Python executor pending' }
+                  : b
+              ),
+            };
+            execTerminalDataRef.current = updated;
+            if (execTerminalIdRef.current) {
+              updateWidget(execTerminalIdRef.current, updated);
+            }
+          }, 1500);
+          break;
+        }
+
+        case 'exec_clear': {
+          execTerminalDataRef.current = { blocks: [] };
+          execBlockCounterRef.current = 0;
+          if (execTerminalIdRef.current) {
+            removeWidget(execTerminalIdRef.current);
+            execTerminalIdRef.current = null;
+          }
+          break;
+        }
       }
     },
-    [addWidget, removeWidget, updateWidget, addLog]
+    [addWidget, removeWidget, updateWidget, addLog, addLog]
   );
 
   const { connect, disconnect, sendAudio, sendContext, status } = useLiveSession({
@@ -323,25 +399,21 @@ function AppInner() {
     callStackIdRef.current = null;
     callStackDataRef.current = { frames: [], overflow: false };
     frameCounterRef.current = 0;
+    execTerminalIdRef.current = null;
+    execTerminalDataRef.current = { blocks: [] };
+    execBlockCounterRef.current = 0;
   }
 
   const canStart = status === 'disconnected' && !isRecording;
   const canStop = isRecording || status === 'connected';
 
   // Theme toggle
-  useEffect(() => {
-    const btn = document.getElementById('theme-toggle');
-    if (!btn) return;
+  const [darkMode, setDarkMode] = useState(true);
+  const toggleTheme = useCallback(() => {
     const html = document.documentElement;
-    const updateBtn = () => {
-      btn.textContent = html.getAttribute('data-theme') === 'dark' ? 'Light' : 'Dark';
-    };
-    updateBtn();
-    btn.addEventListener('click', () => {
-      const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-      html.setAttribute('data-theme', next);
-      updateBtn();
-    });
+    const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    setDarkMode(next === 'dark');
   }, []);
 
   return (
@@ -353,7 +425,7 @@ function AppInner() {
           <div className={`status-dot status-${status}`} title={status} />
         </div>
         <div className="app-toolbar">
-          <button className="toolbar-btn" id="theme-toggle" type="button">Light</button>
+          <button className="toolbar-btn" type="button" onClick={toggleTheme}>{darkMode ? 'Light' : 'Dark'}</button>
         </div>
       </header>
 
@@ -373,7 +445,7 @@ function AppInner() {
         <Canvas />
       </main>
 
-      <LogPanel logs={logs} />
+      <DebugPanel logs={logs} events={events} frontiers={frontiers} conflicts={conflicts} />
     </div>
   );
 }
@@ -385,17 +457,19 @@ function statusLabel(status: string, isRecording: boolean): string {
   return 'Disconnected';
 }
 
-function LogPanel({ logs }: { logs: string[] }) {
+function DebugPanel({ logs, events, frontiers, conflicts }:
+  { logs: string[]; events: SPPEStreamEvent[]; frontiers: Record<string, number>; conflicts: Array<{ actionId: string; won: boolean; timestamp: number }>; }) {
   const [open, setOpen] = useState(true);
+  const [tab, setTab] = useState<'log' | 'dag' | 'waterfall' | 'frontiers'>('log');
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open && bodyRef.current) {
+    if (open && tab === 'log' && bodyRef.current) {
       bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
     }
-  }, [logs, open]);
+  }, [logs, open, tab]);
 
-  function getLogStyle(log: string): React.CSSProperties {
+  function getLogColor(log: string): React.CSSProperties {
     const base: React.CSSProperties = { whiteSpace: 'pre-wrap', lineHeight: 1.6 };
     if (log.includes('sppe:')) {
       if (log.includes('ROLLBACK')) base.color = '#f87171';
@@ -408,17 +482,20 @@ function LogPanel({ logs }: { logs: string[] }) {
     return base;
   }
 
+  const panelStyle: React.CSSProperties = {
+    position: 'fixed', bottom: 12, right: 12, width: 480, zIndex: 9999,
+    background: 'var(--color-surface, #181b22)',
+    border: '1px solid var(--color-border, #2a2f3a)',
+    borderRadius: 10,
+    color: 'var(--color-text, #f3f4f6)',
+    boxShadow: 'var(--color-shadow-lg, 0 16px 40px rgba(0,0,0,0.5))',
+    fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
+    fontSize: 11,
+  };
+
   return (
-    <div className="debug-panel" style={{
-      position: 'fixed', bottom: 12, right: 12, width: 440, zIndex: 9999,
-      background: 'var(--color-surface, #181b22)',
-      border: '1px solid var(--color-border, #2a2f3a)',
-      borderRadius: 10,
-      color: 'var(--color-text, #f3f4f6)',
-      boxShadow: 'var(--color-shadow-lg, 0 16px 40px rgba(0,0,0,0.5))',
-      fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
-      fontSize: 11,
-    }}>
+    <div style={panelStyle}>
+      {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '6px 10px',
@@ -430,29 +507,52 @@ function LogPanel({ logs }: { logs: string[] }) {
         letterSpacing: '0.04em',
         textTransform: 'uppercase',
       }} onClick={() => setOpen(o => !o)}>
-        <span>debug log ({logs.length})</span>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(logs.join('\n')); }}
-            style={{
-              fontSize: 10, background: 'var(--color-surface-2, #1f232b)',
-              color: 'var(--color-text-muted, #9ca3af)',
-              border: '1px solid var(--color-border, #2a2f3a)',
-              cursor: 'pointer', borderRadius: 6, padding: '2px 8px',
-              fontFamily: 'inherit',
-            }}
-          >copy</button>
+        <span>{tab === 'log' ? `log (${logs.length})` : `sppe | ${tab}`}</span>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {conflicts.length > 0 && (
+            <span style={{ color: '#fbbf24' }}>⚡{conflicts.length}</span>
+          )}
           <span>{open ? '▼' : '▲'}</span>
         </div>
       </div>
+
+      {/* Tabs */}
       {open && (
-        <div ref={bodyRef} style={{ maxHeight: 200, overflowY: 'auto', padding: '4px 10px' }}>
-          {logs.length === 0
-            ? <div style={{ color: 'var(--color-text-muted, #9ca3af)', opacity: 0.5 }}>no events yet</div>
-            : logs.map((log, i) => (
-                <div key={i} style={getLogStyle(log)}>{log}</div>
-              ))
-          }
+        <div style={{
+          display: 'flex', gap: 2, padding: '4px 8px',
+          borderBottom: '1px solid var(--color-border, #2a2f3a)',
+          background: 'var(--color-surface-2, #1f232b)',
+        }} onClick={e => e.stopPropagation()}>
+          {(['log', 'dag', 'waterfall', 'frontiers'] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              style={{
+                fontSize: 10, padding: '3px 10px',
+                border: tab === t ? '1px solid var(--color-accent, #ff6200)' : '1px solid transparent',
+                borderRadius: 6,
+                background: tab === t ? 'var(--color-accent-soft, rgba(255,98,0,0.12))' : 'transparent',
+                color: tab === t ? 'var(--color-accent, #ff6200)' : 'var(--color-text-muted, #9ca3af)',
+                cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600,
+                textTransform: 'uppercase', letterSpacing: '0.04em',
+              }}
+            >{t}</button>
+          ))}
+        </div>
+      )}
+
+      {/* Content */}
+      {open && (
+        <div style={{ maxHeight: 280, overflowY: 'auto', padding: '4px 10px' }}
+          ref={tab === 'log' ? bodyRef : undefined}>
+          {tab === 'log' && (
+            logs.length === 0
+              ? <div style={{ color: 'var(--color-text-muted, #9ca3af)', opacity: 0.5 }}>no events yet</div>
+              : logs.map((log, i) => (
+                  <div key={i} style={getLogColor(log)}>{log}</div>
+                ))
+          )}
+          {tab === 'dag' && <DAGVis events={events} />}
+          {tab === 'waterfall' && <StreamWaterfall events={events} />}
+          {tab === 'frontiers' && <FrontierDashboard frontiers={frontiers} />}
         </div>
       )}
     </div>

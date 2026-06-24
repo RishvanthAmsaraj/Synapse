@@ -109,4 +109,44 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
   // ------------------------------------------------------------------
   // Call Stack — BOXED (disabled, component preserved)
   // ------------------------------------------------------------------
+
+  // ------------------------------------------------------------------
+  // Execution Stream
+  // ------------------------------------------------------------------
+  {
+    name: 'exec_python',
+    description:
+      '[EXEC STREAM — Sandboxed] Run a Python snippet and display the output. ' +
+      'The execution runs in a sandboxed environment separate from speech ' +
+      'and canvas updates. The result appears in a terminal-like widget. ' +
+      'Use for quick calculations, data analysis, or algorithm demonstrations. ' +
+      'Works concurrently with speech — you can narrate while code executes.',
+    behavior: Behavior.NON_BLOCKING,
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        code: {
+          type: Type.STRING,
+          description: 'Python code to execute. Keep it short and focused — this is for real-time demos.',
+        },
+        description: {
+          type: Type.STRING,
+          description: 'Brief label for the execution block shown in the terminal widget.',
+        },
+      },
+      required: ['code', 'description'],
+    },
+  },
+
+  {
+    name: 'exec_clear',
+    description:
+      '[EXEC STREAM] Clear the terminal output widget.',
+    behavior: Behavior.NON_BLOCKING,
+    parameters: {
+      type: Type.OBJECT,
+      properties: {},
+      required: [],
+    },
+  },
 ];

@@ -341,6 +341,21 @@ export class SPPE {
   }
 
   /**
+   * Whether any exec actions are in the pipeline.
+   */
+  hasExecActions(): boolean {
+    return this.pendingActions.some(a => a.stream === 'exec') ||
+      this.committedActions.some(a => a.stream === 'exec');
+  }
+
+  /**
+   * Get the latest committed actions for a given stream.
+   */
+  getStreamActions(stream: StreamName): SPPEAction[] {
+    return this.committedActions.filter(a => a.stream === stream);
+  }
+
+  /**
    * Full reset — clears all state.
    */
   reset(): void {

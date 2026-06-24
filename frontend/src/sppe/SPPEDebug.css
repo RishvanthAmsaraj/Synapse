@@ -1,0 +1,148 @@
+/* ============================================================
+ * SPPEDebug.css — Debug visualization styles for SPPE
+ * ============================================================ */
+
+/* ─── DAG Visualization ───────────────────────────────────── */
+.sppe-dag {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sppe-dag-empty {
+  color: var(--color-text-muted, #9ca3af);
+  opacity: 0.5;
+  padding: 8px;
+  text-align: center;
+}
+
+.sppe-dag-node {
+  background: var(--color-surface-2, #1f232b);
+  border-left: 3px solid #666;
+  border-radius: 6px;
+  padding: 6px 10px;
+  transition: background 0.15s;
+}
+
+.sppe-dag-node:hover {
+  background: var(--color-surface-hover, #262b34);
+}
+
+.sppe-dag-node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.sppe-dag-stream {
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.sppe-dag-status {
+  font-size: 9px;
+  color: var(--color-text-muted, #9ca3af);
+  background: var(--color-surface, #181b22);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.sppe-dag-label {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text, #f3f4f6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sppe-dag-children {
+  font-size: 9px;
+  color: var(--color-text-muted, #9ca3af);
+  margin-top: 2px;
+}
+
+/* ─── Stream Waterfall ───────────────────────────────────── */
+.sppe-waterfall-empty,
+.sppe-frontier-empty {
+  color: var(--color-text-muted, #9ca3af);
+  opacity: 0.5;
+  padding: 8px;
+  text-align: center;
+}
+
+.sppe-waterfall {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.sppe-waterfall-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sppe-waterfall-label {
+  width: 50px;
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.sppe-waterfall-track {
+  flex: 1;
+  height: 16px;
+  background: var(--color-surface-2, #1f232b);
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.sppe-waterfall-event {
+  position: absolute;
+  top: 2px;
+  width: 4px;
+  height: 12px;
+  border-radius: 2px;
+  min-width: 2px;
+  transition: left 0.3s ease;
+}
+
+/* ─── Frontier Dashboard ─────────────────────────────────── */
+.sppe-frontier {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sppe-frontier-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--color-surface-2, #1f232b);
+  border-radius: 6px;
+}
+
+.sppe-frontier-label {
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.sppe-frontier-value {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--color-accent, #ff6200);
+  background: var(--color-accent-soft, rgba(255,98,0,0.12));
+  padding: 1px 8px;
+  border-radius: 4px;
+}

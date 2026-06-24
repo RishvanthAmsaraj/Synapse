@@ -1,0 +1,101 @@
+/* TerminalWidget — exec stream output display */
+
+.terminal-widget {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #0d1117;
+  color: #e6edf3;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', 'monospace';
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: #161b22;
+  border-bottom: 1px solid #21262d;
+  flex-shrink: 0;
+}
+
+.terminal-title {
+  font-weight: 600;
+  font-size: 11px;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.terminal-count {
+  font-size: 10px;
+  color: #58a6ff;
+}
+
+.terminal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+}
+
+.terminal-empty {
+  color: #484f58;
+  text-align: center;
+  padding: 20px;
+  font-style: italic;
+}
+
+.terminal-block {
+  margin-bottom: 12px;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.terminal-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #161b22;
+}
+
+.terminal-block-desc {
+  font-weight: 600;
+  font-size: 11px;
+  color: #c9d1d9;
+}
+
+.terminal-status {
+  font-size: 11px;
+}
+
+.terminal-code {
+  margin: 0;
+  padding: 10px 12px;
+  background: #0d1117;
+  color: #e6edf3;
+  font-size: 11px;
+  overflow-x: auto;
+  border-bottom: 1px solid #21262d;
+}
+
+.terminal-output {
+  margin: 0;
+  padding: 10px 12px;
+  background: #0d1117;
+  color: #7ee787;
+  font-size: 11px;
+  overflow-x: auto;
+}
+
+.terminal-error {
+  margin: 0;
+  padding: 10px 12px;
+  background: #0d1117;
+  color: #f85149;
+  font-size: 11px;
+  overflow-x: auto;
+}
