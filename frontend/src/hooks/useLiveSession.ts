@@ -97,9 +97,18 @@ export function useLiveSession({ onAudioChunk, onInterrupted, onToolCall, onTurn
     }
   }
 
-  /** Inject canvas state into the model's context. */
+  /** Last context send timestamp — used to debounce rapid cycles */
+  const lastSendRef = useRef(0);
+
+  /** Minimum ms between context updates after turn_complete */
+  const HOLD_MS = 300;
+
+  /** Inject canvas state into the model's context. Debounces rapid cycles. */
   function sendContext(text: string) {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      const now = Date.now();
+      if (now - lastSendRef.current < HOLD_MS) return; // debounce
+      lastSendRef.current = now;
       wsRef.current.send(JSON.stringify({ type: 'context', text }));
     }
   }

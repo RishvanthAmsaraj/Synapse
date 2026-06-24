@@ -61,10 +61,22 @@ export function useAudioPlayback() {
    * Stop all queued audio immediately on barge-in / interruption.
    * Keeps the AudioContext alive so playback resumes cleanly without
    * any suspended-state or recreation race conditions.
+   * Uses a 30ms exponential fade-out to avoid the audible pop/clip
+   * that abrupt `.stop()` can produce.
    */
   function flush() {
     for (const source of sourcesRef.current) {
-      try { source.stop(); } catch (_) { /* already ended */ }
+      try {
+        // Quick fade-out to avoid audible pop
+        const now = source.context.currentTime;
+        const gain = source.context.createGain();
+        source.disconnect();
+        source.connect(gain);
+        gain.connect(source.context.destination);
+        gain.gain.setValueAtTime(1, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+        source.stop(now + 0.03);
+      } catch (_) { /* already ended or disposed */ }
     }
     sourcesRef.current = [];
     nextPlayAtRef.current = ctxRef.current ? ctxRef.current.currentTime : 0;

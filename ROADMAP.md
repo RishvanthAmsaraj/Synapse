@@ -17,15 +17,18 @@ Synapse introduces the **Concurrent Multimodal Stream Architecture (CMSA)**:
 ## Phase 1: SPPE Expansion
 
 ### New Streams
-- [ ] **Exec stream** — Sandboxed Python/JS execution via WebContainer
-- [ ] **Exec stream** — Terminal widget for interactive shell sessions
-- [ ] **Speech stream** — Caption overlay with real-time transcription display
+- [x] **Exec stream** — Action scheduling and tool declarations
+- [ ] **Exec sandbox** — Backend Python/JS execution (Pyodide / WebAssembly)
+- [ ] **Terminal widget** — Interactive shell session with xterm.js
+- [ ] **Caption overlay** — Real-time transcription display
 
 ### SPPE Features
-- [ ] **DAG visualization** — Debug panel shows the live dependency graph
-- [ ] **Conflict resolution UI** — Visual indicators for concurrent write conflicts
-- [ ] **Stream waterfall** — Timeline view of all three streams
-- [ ] **Frontier dashboard** — Real-time frontier version display
+- [x] **DAG visualization** — Debug panel shows the live dependency graph
+- [ ] **Conflict resolution UI** — Visual indicators with resolution timeline
+- [x] **Stream waterfall** — Timeline view of all three streams
+- [x] **Frontier dashboard** — Real-time frontier version display
+- [x] **Exec stream routing** — SPPE schedules exec actions as independent stream
+- [x] **Terminal widget** — Code/output/error display with status indicators
 
 ## Phase 2: New Widgets
 
