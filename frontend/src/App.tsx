@@ -417,6 +417,18 @@ function AppInner() {
   }, []);
 
   const hasWidgets = widgets.length > 0;
+  const statusEl = (
+    <p className="hero-status">
+      <span className={`live-dot live-${status}${isRecording && status === 'connected' ? ' live-recording' : ''}`} />
+      {statusLabel(status, isRecording)}
+    </p>
+  );
+  const sessionControls = (
+    <>
+      <button onClick={handleStart} disabled={!canStart} className="btn btn-start">Start session</button>
+      <button onClick={handleStop} disabled={!canStop} className="btn btn-stop">Stop</button>
+    </>
+  );
 
   return (
     <div className="app">
@@ -430,24 +442,26 @@ function AppInner() {
       </header>
 
       <main className={`app-main${hasWidgets ? ' has-widgets' : ''}`}>
-        <section className="hero">
-          <Orb status={status} listening={isRecording} />
-          <p className="hero-status">
-            <span className={`live-dot live-${status}${isRecording && status === 'connected' ? ' live-recording' : ''}`} />
-            {statusLabel(status, isRecording)}
-          </p>
-        </section>
-
-        {hasWidgets && <Canvas />}
-
-        <div className="controls-bar">
-          <button onClick={handleStart} disabled={!canStart} className="btn btn-start">
-            Start session
-          </button>
-          <button onClick={handleStop} disabled={!canStop} className="btn btn-stop">
-            Stop
-          </button>
-        </div>
+        {!hasWidgets ? (
+          <>
+            <section className="hero">
+              <Orb status={status} listening={isRecording} />
+              {statusEl}
+            </section>
+            <div className="controls-bar">{sessionControls}</div>
+          </>
+        ) : (
+          <>
+            <Canvas />
+            <div className="session-bar">
+              <div className="session-voice">
+                <Orb status={status} listening={isRecording} mini />
+                {statusEl}
+              </div>
+              <div className="session-controls">{sessionControls}</div>
+            </div>
+          </>
+        )}
       </main>
 
       <DebugPanel logs={logs} events={events} frontiers={frontiers} conflicts={conflicts} />
@@ -455,8 +469,8 @@ function AppInner() {
   );
 }
 
-/** The luminous voice orb — the centerpiece. Reacts to session state. */
-function Orb({ status, listening }: { status: string; listening: boolean }) {
+/** The luminous voice orb — the speech stream made visible. */
+function Orb({ status, listening, mini = false }: { status: string; listening: boolean; mini?: boolean }) {
   let state: string;
   if (status === 'connected' && listening) state = 'listening';
   else if (status === 'connected') state = 'idle';
@@ -464,7 +478,7 @@ function Orb({ status, listening }: { status: string; listening: boolean }) {
   else state = 'disconnected';
 
   return (
-    <div className={`orb-wrap orb--${state}`}>
+    <div className={`orb-wrap orb--${state}${mini ? ' mini' : ''}`}>
       <div className="orb-core" />
       <div className="orb-sheen" />
       <div className="orb-ring r1" />

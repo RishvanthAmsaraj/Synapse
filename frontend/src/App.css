@@ -386,14 +386,44 @@ html, body {
   50%      { opacity: 0.35; }
 }
 
-/* ===== Widgets present: hero compresses ===== */
-.app-main.has-widgets .hero {
-  flex: 0 0 auto;
-  padding: 14px 0 0;
-  gap: 14px;
+/* ===== Widgets present: canvas takes the stage ===== */
+.app-main.has-widgets {
+  justify-content: flex-start;
 }
-.app-main.has-widgets .orb-wrap {
-  transform: scale(0.48);
+.app-main.has-widgets .canvas-scroll {
+  flex: 1;
+  min-height: 0;
+  align-self: stretch;
+}
+
+/* ===== Session bar (docked orb + controls while the stage is live) ===== */
+.session-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 24px 20px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 5;
+}
+
+.session-voice {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.orb-wrap.mini {
+  width: 54px;
+  height: 54px;
+}
+
+.session-controls {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 /* ===== Controls ===== */

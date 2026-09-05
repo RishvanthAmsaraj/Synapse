@@ -45,8 +45,7 @@ export function Canvas() {
             key={widget.id}
             className="canvas-cell"
             style={{
-              width: widget.cols >= 2 ? 420 : 300,
-              height: widget.rows >= 2 ? 280 : 220,
+              width: widget.cols >= 2 ? 560 : 420,
             }}
           >
             {renderWidget(widget.type, widget.data)}
