@@ -15,7 +15,7 @@ export function ImageWidget({ data }: { data: ImageWidgetData }) {
       <div style={{
         width: '100%', height: '100%',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: '#1a1a1a', color: '#555', fontSize: 13, fontFamily: 'monospace',
+        background: 'var(--surface)', color: 'var(--text-muted)', fontSize: 13, fontFamily: 'var(--font-mono)',
       }}>
         Searching for &ldquo;{data.query}&rdquo;&hellip;
       </div>
@@ -27,7 +27,7 @@ export function ImageWidget({ data }: { data: ImageWidgetData }) {
     <div style={{
       width: '100%', height: '100%',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: '#111',
+      background: 'var(--code-bg)',
     }}>
       {/* Inner div: aspect-ratio:1 + maxHeight:100% → constrained to the shorter dimension → true square */}
       <div style={{
@@ -47,7 +47,7 @@ export function ImageWidget({ data }: { data: ImageWidgetData }) {
           position: 'absolute', bottom: 0, left: 0, right: 0,
           background: 'linear-gradient(transparent, rgba(0,0,0,0.75))',
           padding: '16px 8px 6px',
-          color: '#d0d0d0', fontSize: 11, fontFamily: 'sans-serif', letterSpacing: '0.02em',
+          color: 'var(--text-secondary)', fontSize: 11, fontFamily: 'var(--font-sans)', letterSpacing: '0.02em',
         }}>
           {data.query}
         </div>

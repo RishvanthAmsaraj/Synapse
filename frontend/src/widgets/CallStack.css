@@ -3,21 +3,20 @@
   flex-direction: column;
   height: 100%;
   border-radius: 8px;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--border);
   overflow: hidden;
-  transition: border-color 0.3s;
+  transition: border-color 0.2s;
 }
 
 .call-stack--overflow {
-  border-color: #e53935;
-  box-shadow: 0 0 12px rgba(229, 57, 53, 0.25);
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger-soft);
 }
 
-/* Header */
 .call-stack-header {
-  background: #1a1a1a;
-  padding: 6px 14px;
-  border-bottom: 1px solid #2a2a2a;
+  background: var(--surface-2);
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -25,26 +24,24 @@
 }
 
 .call-stack-title {
-  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .call-stack-overflow-badge {
-  font-size: 0.65rem;
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
   letter-spacing: 0.06em;
-  color: #e53935;
-  animation: badge-pulse 1s ease-in-out infinite;
+  color: var(--danger);
+  background: var(--danger-soft);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
-@keyframes badge-pulse {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.4; }
-}
-
-/* Frames container */
 .call-stack-frames {
   flex: 1;
   overflow-y: auto;
@@ -56,17 +53,17 @@
 }
 
 .call-stack-empty {
-  color: #333;
-  font-size: 0.8rem;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 12px;
   text-align: center;
   margin: auto;
 }
 
-/* Individual frame */
 .call-stack-frame {
-  background: #1e1e1e;
-  border: 1px solid #2e2e2e;
-  border-radius: 5px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
   padding: 7px 12px;
   display: flex;
   align-items: baseline;
@@ -76,38 +73,30 @@
 }
 
 @keyframes frame-slide-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Top frame (most recent call) */
 .call-stack-frame--active {
-  background: #1f2d1f;
-  border-color: #4caf50;
+  background: var(--success-soft);
+  border-color: var(--success);
 }
 
 .frame-name {
-  font-size: 0.82rem;
+  font-size: 12px;
   font-weight: 500;
-  color: #e8e8e8;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  color: var(--text);
+  font-family: var(--font-mono);
 }
 
 .frame-args {
-  font-size: 0.72rem;
-  color: #666;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
 }
 
-/* Phantom frame shown during overflow */
 .call-stack-frame--phantom {
-  opacity: 0.3;
+  opacity: 0.35;
   border-style: dashed;
   height: 34px;
 }

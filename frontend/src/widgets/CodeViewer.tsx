@@ -33,9 +33,9 @@ export function CodeViewer({ data }: { data: CodeViewerData }) {
               return {
                 style: {
                   display: 'block',
-                  backgroundColor: 'rgba(255, 200, 0, 0.15)',
-                  borderLeft: '3px solid #ffc800',
-                  marginLeft: '-3px',
+                  backgroundColor: 'var(--accent-soft)',
+                  borderLeft: '2px solid var(--accent)',
+                  marginLeft: '-2px',
                 },
               };
             }
@@ -45,7 +45,7 @@ export function CodeViewer({ data }: { data: CodeViewerData }) {
             margin: 0,
             padding: '12px 16px',
             height: '100%',
-            borderRadius: '0 0 8px 8px',
+            borderRadius: '0 0 6px 6px',
             fontSize: '0.8rem',
             lineHeight: '1.5',
             overflowY: 'auto',

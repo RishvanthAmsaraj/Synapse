@@ -472,24 +472,24 @@ function DebugPanel({ logs, events, frontiers, conflicts }:
   function getLogColor(log: string): React.CSSProperties {
     const base: React.CSSProperties = { whiteSpace: 'pre-wrap', lineHeight: 1.6 };
     if (log.includes('sppe:')) {
-      if (log.includes('ROLLBACK')) base.color = '#f87171';
-      else if (log.includes('CONFLICT')) base.color = '#fbbf24';
-      else if (log.includes('commit')) { base.color = '#34d399'; base.opacity = 0.8; }
-      else base.color = '#93c5fd';
+      if (log.includes('ROLLBACK')) base.color = 'var(--danger)';
+      else if (log.includes('CONFLICT')) base.color = 'var(--warning)';
+      else if (log.includes('commit')) { base.color = 'var(--success)'; base.opacity = 0.85; }
+      else base.color = 'var(--accent)';
     } else if (log.includes('turn_complete')) {
-      base.color = '#a78bfa';
+      base.color = 'var(--text-muted)';
     }
     return base;
   }
 
   const panelStyle: React.CSSProperties = {
     position: 'fixed', bottom: 12, right: 12, width: 480, zIndex: 9999,
-    background: 'var(--color-surface, #181b22)',
-    border: '1px solid var(--color-border, #2a2f3a)',
+    background: 'var(--surface)',
+    border: '1px solid var(--border-strong)',
     borderRadius: 10,
-    color: 'var(--color-text, #f3f4f6)',
-    boxShadow: 'var(--color-shadow-lg, 0 16px 40px rgba(0,0,0,0.5))',
-    fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
+    color: 'var(--text)',
+    boxShadow: 'var(--shadow-lg)',
+    fontFamily: "var(--font-mono)",
     fontSize: 11,
   };
 
@@ -499,9 +499,9 @@ function DebugPanel({ logs, events, frontiers, conflicts }:
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '6px 10px',
-        borderBottom: open ? '1px solid var(--color-border, #2a2f3a)' : 'none',
+        borderBottom: open ? '1px solid var(--border)' : 'none',
         cursor: 'pointer', userSelect: 'none',
-        color: 'var(--color-text-muted, #9ca3af)',
+        color: 'var(--text-muted)',
         fontWeight: 600,
         fontSize: 11,
         letterSpacing: '0.04em',
@@ -510,9 +510,9 @@ function DebugPanel({ logs, events, frontiers, conflicts }:
         <span>{tab === 'log' ? `log (${logs.length})` : `sppe | ${tab}`}</span>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           {conflicts.length > 0 && (
-            <span style={{ color: '#fbbf24' }}>⚡{conflicts.length}</span>
+            <span style={{ color: 'var(--warning)' }}>{conflicts.length}</span>
           )}
-          <span>{open ? '▼' : '▲'}</span>
+          <span>{open ? '▾' : '▸'}</span>
         </div>
       </div>
 
@@ -520,17 +520,17 @@ function DebugPanel({ logs, events, frontiers, conflicts }:
       {open && (
         <div style={{
           display: 'flex', gap: 2, padding: '4px 8px',
-          borderBottom: '1px solid var(--color-border, #2a2f3a)',
-          background: 'var(--color-surface-2, #1f232b)',
+          borderBottom: '1px solid var(--border)',
+          background: 'var(--surface-2)',
         }} onClick={e => e.stopPropagation()}>
           {(['log', 'dag', 'waterfall', 'frontiers'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
               style={{
                 fontSize: 10, padding: '3px 10px',
-                border: tab === t ? '1px solid var(--color-accent, #ff6200)' : '1px solid transparent',
+                border: tab === t ? '1px solid var(--accent-border)' : '1px solid transparent',
                 borderRadius: 6,
-                background: tab === t ? 'var(--color-accent-soft, rgba(255,98,0,0.12))' : 'transparent',
-                color: tab === t ? 'var(--color-accent, #ff6200)' : 'var(--color-text-muted, #9ca3af)',
+                background: tab === t ? 'var(--accent-soft)' : 'transparent',
+                color: tab === t ? 'var(--accent)' : 'var(--text-muted)',
                 cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600,
                 textTransform: 'uppercase', letterSpacing: '0.04em',
               }}
@@ -545,7 +545,7 @@ function DebugPanel({ logs, events, frontiers, conflicts }:
           ref={tab === 'log' ? bodyRef : undefined}>
           {tab === 'log' && (
             logs.length === 0
-              ? <div style={{ color: 'var(--color-text-muted, #9ca3af)', opacity: 0.5 }}>no events yet</div>
+              ? <div style={{ color: 'var(--text-muted)', opacity: 0.5 }}>no events yet</div>
               : logs.map((log, i) => (
                   <div key={i} style={getLogColor(log)}>{log}</div>
                 ))

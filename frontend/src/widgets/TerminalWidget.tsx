@@ -49,9 +49,7 @@ export function TerminalWidget({ data }: TerminalWidgetProps) {
               <div className="terminal-block-header">
                 <span className="terminal-block-desc">{block.description}</span>
                 <span className={`terminal-status terminal-status-${block.status}`}>
-                  {block.status === 'running' && '⏳'}
-                  {block.status === 'done' && '✅'}
-                  {block.status === 'error' && '❌'}
+                  {block.status}
                 </span>
               </div>
               <pre className="terminal-code">{truncateCode(block.code)}</pre>

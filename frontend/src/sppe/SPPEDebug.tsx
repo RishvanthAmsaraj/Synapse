@@ -84,9 +84,9 @@ interface DAGNode {
 }
 
 const STREAM_COLORS: Record<string, string> = {
-  speech: '#6366f1', // indigo
-  widget: '#f59e0b', // amber
-  exec:   '#10b981', // emerald
+  speech: '#7c9bfa', // blue
+  widget: '#d9a441', // gold
+  exec:   '#34c78a', // emerald
 };
 
 export function DAGVis({ events }: { events: SPPEStreamEvent[] }) {

@@ -1,14 +1,14 @@
-/* TerminalWidget — exec stream output display */
+/* TerminalWidget — exec stream output */
 
 .terminal-widget {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #0d1117;
-  color: #e6edf3;
-  font-family: 'SF Mono', 'Menlo', 'Consolas', 'monospace';
+  background: var(--code-bg);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .terminal-header {
@@ -16,22 +16,22 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 14px;
-  background: #161b22;
-  border-bottom: 1px solid #21262d;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .terminal-title {
   font-weight: 600;
-  font-size: 11px;
-  color: #8b949e;
+  font-size: 10px;
+  color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
 }
 
 .terminal-count {
   font-size: 10px;
-  color: #58a6ff;
+  color: var(--accent);
 }
 
 .terminal-body {
@@ -41,15 +41,15 @@
 }
 
 .terminal-empty {
-  color: #484f58;
+  color: var(--text-faint);
   text-align: center;
   padding: 20px;
   font-style: italic;
 }
 
 .terminal-block {
-  margin-bottom: 12px;
-  border: 1px solid #21262d;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -59,34 +59,39 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 12px;
-  background: #161b22;
+  background: var(--surface-2);
 }
 
 .terminal-block-desc {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 11px;
-  color: #c9d1d9;
+  color: var(--text);
 }
 
 .terminal-status {
-  font-size: 11px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
 }
+.terminal-status-running { color: var(--warning); }
+.terminal-status-done    { color: var(--success); }
+.terminal-status-error   { color: var(--danger); }
 
 .terminal-code {
   margin: 0;
   padding: 10px 12px;
-  background: #0d1117;
-  color: #e6edf3;
+  background: var(--code-bg);
+  color: var(--text-secondary);
   font-size: 11px;
   overflow-x: auto;
-  border-bottom: 1px solid #21262d;
+  border-bottom: 1px solid var(--border);
 }
 
 .terminal-output {
   margin: 0;
   padding: 10px 12px;
-  background: #0d1117;
-  color: #7ee787;
+  background: var(--code-bg);
+  color: var(--success);
   font-size: 11px;
   overflow-x: auto;
 }
@@ -94,8 +99,8 @@
 .terminal-error {
   margin: 0;
   padding: 10px 12px;
-  background: #0d1117;
-  color: #f85149;
+  background: var(--code-bg);
+  color: var(--danger);
   font-size: 11px;
   overflow-x: auto;
 }
