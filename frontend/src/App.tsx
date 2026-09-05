@@ -31,7 +31,7 @@ export default function App() {
 }
 
 function AppInner() {
-  const { addWidget, removeWidget, updateWidget, clearWidgets, getInventoryString } = useCanvas();
+  const { addWidget, removeWidget, updateWidget, clearWidgets, getInventoryString, widgets } = useCanvas();
   const { playChunk, flush, stop } = useAudioPlayback();
   const { pushEvent, pushConflict, setFrontier, events, frontiers, conflicts } = useSPPEDebug();
 
@@ -416,36 +416,60 @@ function AppInner() {
     setDarkMode(next === 'dark');
   }, []);
 
+  const hasWidgets = widgets.length > 0;
+
   return (
     <div className="app">
+      <div className="aurora" aria-hidden="true" />
+
       <header className="app-header">
-        <div className="brand">
-          <div className="brand-mark" aria-hidden="true">S</div>
-          <span>Synapse</span>
-          <div className={`status-dot status-${status}`} title={status} />
-        </div>
+        <span className="brand-name">Synapse</span>
         <div className="app-toolbar">
           <button className="toolbar-btn" type="button" onClick={toggleTheme}>{darkMode ? 'Light' : 'Dark'}</button>
         </div>
       </header>
 
-      <main className="app-main">
-        <div className="controls-bar">
-          <p className="status-label">{statusLabel(status, isRecording)}</p>
-          <div className="controls">
-            <button onClick={handleStart} disabled={!canStart} className="btn btn-start">
-              Start
-            </button>
-            <button onClick={handleStop} disabled={!canStop} className="btn btn-stop">
-              Stop
-            </button>
-          </div>
-        </div>
+      <main className={`app-main${hasWidgets ? ' has-widgets' : ''}`}>
+        <section className="hero">
+          <Orb status={status} listening={isRecording} />
+          <p className="hero-status">
+            <span className={`live-dot live-${status}${isRecording && status === 'connected' ? ' live-recording' : ''}`} />
+            {statusLabel(status, isRecording)}
+          </p>
+        </section>
 
-        <Canvas />
+        {hasWidgets && <Canvas />}
+
+        <div className="controls-bar">
+          <button onClick={handleStart} disabled={!canStart} className="btn btn-start">
+            Start session
+          </button>
+          <button onClick={handleStop} disabled={!canStop} className="btn btn-stop">
+            Stop
+          </button>
+        </div>
       </main>
 
       <DebugPanel logs={logs} events={events} frontiers={frontiers} conflicts={conflicts} />
+    </div>
+  );
+}
+
+/** The luminous voice orb — the centerpiece. Reacts to session state. */
+function Orb({ status, listening }: { status: string; listening: boolean }) {
+  let state: string;
+  if (status === 'connected' && listening) state = 'listening';
+  else if (status === 'connected') state = 'idle';
+  else if (status === 'connecting') state = 'connecting';
+  else state = 'disconnected';
+
+  return (
+    <div className={`orb-wrap orb--${state}`}>
+      <div className="orb-core" />
+      <div className="orb-sheen" />
+      <div className="orb-ring r1" />
+      <div className="orb-ring r2" />
+      <div className="orb-ring r3" />
     </div>
   );
 }
@@ -459,7 +483,7 @@ function statusLabel(status: string, isRecording: boolean): string {
 
 function DebugPanel({ logs, events, frontiers, conflicts }:
   { logs: string[]; events: SPPEStreamEvent[]; frontiers: Record<string, number>; conflicts: Array<{ actionId: string; won: boolean; timestamp: number }>; }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<'log' | 'dag' | 'waterfall' | 'frontiers'>('log');
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -486,9 +510,11 @@ function DebugPanel({ logs, events, frontiers, conflicts }:
     position: 'fixed', bottom: 12, right: 12, width: 480, zIndex: 9999,
     background: 'var(--surface)',
     border: '1px solid var(--border-strong)',
-    borderRadius: 10,
+    borderRadius: 12,
     color: 'var(--text)',
     boxShadow: 'var(--shadow-lg)',
+    backdropFilter: 'blur(24px)',
+    WebkitBackdropFilter: 'blur(24px)',
     fontFamily: "var(--font-mono)",
     fontSize: 11,
   };

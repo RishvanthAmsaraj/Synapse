@@ -24,9 +24,9 @@ export function Canvas() {
   const { widgets } = useCanvas();
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom whenever a new widget is added
+  // Auto-scroll to the newest widget (horizontal filmstrip)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', inline: 'end' });
   }, [widgets.length]);
 
   if (widgets.length === 0) {
@@ -45,8 +45,8 @@ export function Canvas() {
             key={widget.id}
             className="canvas-cell"
             style={{
-              gridColumn: `span ${widget.cols}`,
-              gridRow: `span ${widget.rows}`,
+              width: widget.cols >= 2 ? 420 : 300,
+              height: widget.rows >= 2 ? 280 : 220,
             }}
           >
             {renderWidget(widget.type, widget.data)}
