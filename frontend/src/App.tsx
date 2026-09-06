@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { CanvasProvider, useCanvas } from './canvas/CanvasProvider';
 import { Canvas } from './canvas/Canvas';
 import { SPPE, type SPPEStreamEvent } from './sppe/SPPE';
@@ -32,7 +32,14 @@ export default function App() {
 
 function AppInner() {
   const { addWidget, removeWidget, updateWidget, clearWidgets, getInventoryString, widgets } = useCanvas();
-  const { playChunk, flush, stop } = useAudioPlayback();
+  // Live audio level (mic + TTS playback) — drives the orb's pulse.
+  const audioPeakRef = useRef<number>(0);
+
+  const { playChunk, flush, stop } = useAudioPlayback(
+    useCallback((level: number) => {
+      audioPeakRef.current = Math.max(audioPeakRef.current, level);
+    }, [])
+  );
   const { pushEvent, pushConflict, setFrontier, events, frontiers, conflicts } = useSPPEDebug();
 
   // Debug log panel
@@ -365,7 +372,10 @@ function AppInner() {
   });
 
   const { start: startMic, stop: stopMic, isRecording } = useAudioIO(
-    useCallback((chunk: string) => sendAudio(chunk), [sendAudio])
+    useCallback((chunk: string) => sendAudio(chunk), [sendAudio]),
+    useCallback((level: number) => {
+      audioPeakRef.current = Math.max(audioPeakRef.current, level);
+    }, [])
   );
 
   // Log session status changes
@@ -445,7 +455,7 @@ function AppInner() {
         {!hasWidgets ? (
           <>
             <section className="hero">
-              <Orb status={status} listening={isRecording} />
+              <Orb status={status} listening={isRecording} peakRef={audioPeakRef} />
               {statusEl}
             </section>
             <div className="controls-bar">{sessionControls}</div>
@@ -455,7 +465,7 @@ function AppInner() {
             <Canvas />
             <div className="session-bar">
               <div className="session-voice">
-                <Orb status={status} listening={isRecording} mini />
+                <Orb status={status} listening={isRecording} mini peakRef={audioPeakRef} />
                 {statusEl}
               </div>
               <div className="session-controls">{sessionControls}</div>
@@ -469,8 +479,35 @@ function AppInner() {
   );
 }
 
-/** The luminous voice orb — the speech stream made visible. */
-function Orb({ status, listening, mini = false }: { status: string; listening: boolean; mini?: boolean }) {
+/** The luminous voice orb — the speech stream made visible. Reacts to live
+ *  audio level (mic + TTS playback) via the shared peak ref. */
+function Orb({ status, listening, mini = false, peakRef }: {
+  status: string; listening: boolean; mini?: boolean; peakRef: MutableRefObject<number>;
+}) {
+  const coreRef = useRef<HTMLDivElement>(null);
+  const auraRef = useRef<HTMLDivElement>(null);
+  const smoothedRef = useRef(0);
+
+  // Peak-hold with decay: read the highest level seen since the last frame,
+  // then ease toward it. Gives smooth, organic motion from chunked updates.
+  useEffect(() => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let raf = 0;
+    const tick = () => {
+      const target = peakRef.current;
+      peakRef.current = 0;
+      smoothedRef.current += (target - smoothedRef.current) * 0.28;
+      const s = smoothedRef.current;
+      if (!reduced) {
+        if (coreRef.current) coreRef.current.style.transform = `scale(${(1 + s * 0.26).toFixed(4)})`;
+        if (auraRef.current) auraRef.current.style.opacity = String(0.28 + s * 0.72);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [peakRef]);
+
   let state: string;
   if (status === 'connected' && listening) state = 'listening';
   else if (status === 'connected') state = 'idle';
@@ -479,7 +516,8 @@ function Orb({ status, listening, mini = false }: { status: string; listening: b
 
   return (
     <div className={`orb-wrap orb--${state}${mini ? ' mini' : ''}`}>
-      <div className="orb-core" />
+      <div className="orb-aura" ref={auraRef} />
+      <div className="orb-core" ref={coreRef} />
       <div className="orb-sheen" />
       <div className="orb-ring r1" />
       <div className="orb-ring r2" />

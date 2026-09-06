@@ -251,6 +251,19 @@ html, body {
   height: 200px;
   flex-shrink: 0;
   transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: orb-breathe 5s ease-in-out infinite;
+}
+
+/* soft halo behind the core — brightness driven by live audio level */
+.orb-aura {
+  position: absolute;
+  inset: -30%;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--orb-glow) 0%, transparent 62%);
+  filter: blur(28px);
+  opacity: 0.28;
+  pointer-events: none;
+  transition: opacity 120ms linear;
 }
 
 .orb-core {
@@ -269,8 +282,8 @@ html, body {
     0 0 120px var(--orb-glow-soft),
     inset 0 -26px 52px rgba(4, 3, 12, 0.55),
     inset 0 14px 28px rgba(255, 255, 255, 0.14);
-  animation: orb-breathe 5s ease-in-out infinite;
   transition: filter 0.5s ease, box-shadow 0.5s ease;
+  will-change: transform;
 }
 
 /* glassy sheen that slowly orbits the sphere */
@@ -309,9 +322,9 @@ html, body {
 }
 
 /* ── Orb states ── */
+.orb-wrap.orb--disconnected { animation: orb-breathe 6s ease-in-out infinite; }
 .orb-wrap.orb--disconnected .orb-core {
   filter: saturate(0.45) brightness(0.8);
-  animation: orb-breathe 6s ease-in-out infinite;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.05),
     0 0 30px var(--orb-glow-soft),
@@ -320,8 +333,8 @@ html, body {
     inset 0 14px 28px rgba(255, 255, 255, 0.12);
 }
 
+.orb-wrap.orb--connecting { animation: orb-breathe 2.2s ease-in-out infinite; }
 .orb-wrap.orb--connecting .orb-core {
-  animation: orb-breathe 2.2s ease-in-out infinite;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.05),
     0 0 40px var(--orb-glow-soft),
@@ -330,14 +343,14 @@ html, body {
     inset 0 14px 28px rgba(255, 255, 255, 0.14);
 }
 
+.orb-wrap.orb--idle { animation: orb-breathe 4s ease-in-out infinite; }
 .orb-wrap.orb--idle .orb-core {
   filter: saturate(1) brightness(1.02);
-  animation: orb-breathe 4s ease-in-out infinite;
 }
 
+.orb-wrap.orb--listening { animation: orb-breathe 1.7s ease-in-out infinite; }
 .orb-wrap.orb--listening .orb-core {
   filter: saturate(1.25) brightness(1.1);
-  animation: orb-breathe 1.7s ease-in-out infinite;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.07),
     0 0 64px var(--orb-glow),
@@ -351,7 +364,7 @@ html, body {
 .orb-wrap.orb--listening .orb-ring.r3 { animation-delay: 1.6s; }
 
 @media (prefers-reduced-motion: reduce) {
-  .orb-core, .orb-sheen, .orb-ring { animation: none !important; }
+  .orb-wrap, .orb-core, .orb-sheen, .orb-ring { animation: none !important; }
 }
 
 /* ===== Hero status ===== */

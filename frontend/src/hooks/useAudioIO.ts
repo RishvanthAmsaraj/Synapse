@@ -1,20 +1,28 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 // Gemini Live expects 16kHz mono PCM
 const INPUT_SAMPLE_RATE = 16000;
 
 /**
  * Captures microphone input as 16-bit PCM chunks and calls onChunk
- * with each base64-encoded chunk.
- * 
+ * with each base64-encoded chunk. Also reports the per-block RMS level
+ * (0-1) through onLevel, so the orb can react to the user's voice.
+ *
  * Uses AudioWorklet for efficient audio processing without blocking
  * the main thread.
  */
-export function useAudioIO(onChunk: (base64: string) => void) {
+export function useAudioIO(
+  onChunk: (base64: string) => void,
+  onLevel?: (level: number) => void,
+) {
   const ctxRef = useRef<AudioContext | null>(null);
   const workletRef = useRef<AudioWorkletNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+
+  // Keep the latest onLevel so start()'s closure never goes stale
+  const onLevelRef = useRef(onLevel);
+  useEffect(() => { onLevelRef.current = onLevel; }, [onLevel]);
 
   async function start() {
     if (isRecording) return;
@@ -31,8 +39,12 @@ export function useAudioIO(onChunk: (base64: string) => void) {
     const worklet = new AudioWorkletNode(ctx, 'pcm-processor');
     workletRef.current = worklet;
 
-    worklet.port.onmessage = (e: MessageEvent<{ type: string; buffer: ArrayBuffer }>) => {
-      if (e.data.type !== 'pcm') return;
+    worklet.port.onmessage = (e: MessageEvent<{ type: string; buffer?: ArrayBuffer; level?: number }>) => {
+      if (e.data.type === 'level') {
+        onLevelRef.current?.(e.data.level as number);
+        return;
+      }
+      if (e.data.type !== 'pcm' || !e.data.buffer) return;
       // Convert ArrayBuffer to base64
       const bytes = new Uint8Array(e.data.buffer);
       let binary = '';

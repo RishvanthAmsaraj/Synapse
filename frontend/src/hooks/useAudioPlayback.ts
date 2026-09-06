@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 // Gemini Live outputs 24kHz PCM audio
 const OUTPUT_SAMPLE_RATE = 24000;
@@ -6,19 +6,61 @@ const OUTPUT_SAMPLE_RATE = 24000;
 /**
  * Queues and plays PCM audio chunks from Gemini.
  * Uses a scheduled playback cursor so chunks play back-to-back without gaps.
+ *
+ * Also reports a live output level (0-1) through onLevel, computed from an
+ * AnalyserNode on the output chain — this drives the orb's audio reactivity
+ * while the agent speaks.
  */
-export function useAudioPlayback() {
+export function useAudioPlayback(onLevel?: (level: number) => void) {
   const ctxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
   const nextPlayAtRef = useRef<number>(0);
   // Track all scheduled sources so flush() can stop them individually
   const sourcesRef = useRef<AudioBufferSourceNode[]>([]);
+  const pumpRef = useRef<number | null>(null);
+
+  // Keep the latest onLevel without recreating the pump
+  const onLevelRef = useRef(onLevel);
+  useEffect(() => { onLevelRef.current = onLevel; }, [onLevel]);
 
   function getCtx(): AudioContext {
     if (!ctxRef.current || ctxRef.current.state === 'closed') {
       ctxRef.current = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
       nextPlayAtRef.current = 0;
+
+      // Level metering: all playback routes through this analyser on its
+      // way to the speakers, so the orb reacts to the agent's voice.
+      const analyser = ctxRef.current.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.4;
+      analyser.connect(ctxRef.current.destination);
+      analyserRef.current = analyser;
     }
     return ctxRef.current;
+  }
+
+  /** rAF pump: reads the analyser and reports the current RMS level. */
+  function startPump() {
+    if (pumpRef.current != null) return;
+    const tick = () => {
+      const analyser = analyserRef.current;
+      const ctx = ctxRef.current;
+      if (analyser && ctx && ctx.state !== 'closed') {
+        const buf = new Uint8Array(analyser.fftSize);
+        analyser.getByteTimeDomainData(buf);
+        let sumSq = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i] - 128) / 128;
+          sumSq += v * v;
+        }
+        const rms = Math.sqrt(sumSq / buf.length);
+        onLevelRef.current?.(Math.min(1, rms * 3.5));
+        pumpRef.current = requestAnimationFrame(tick);
+      } else {
+        pumpRef.current = null;
+      }
+    };
+    pumpRef.current = requestAnimationFrame(tick);
   }
 
   function playChunk(base64: string) {
@@ -43,7 +85,8 @@ export function useAudioPlayback() {
 
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
-    source.connect(ctx.destination);
+    // Route through the analyser so the orb can meter agent speech
+    source.connect(analyserRef.current ?? ctx.destination);
 
     // Track the source; remove it from the list once it finishes naturally
     sourcesRef.current.push(source);
@@ -55,6 +98,8 @@ export function useAudioPlayback() {
     const startAt = Math.max(now, nextPlayAtRef.current);
     source.start(startAt);
     nextPlayAtRef.current = startAt + audioBuffer.duration;
+
+    startPump();
   }
 
   /**
@@ -85,10 +130,15 @@ export function useAudioPlayback() {
   /** Full teardown on session end — closes the AudioContext entirely. */
   function stop() {
     flush();
+    if (pumpRef.current != null) {
+      cancelAnimationFrame(pumpRef.current);
+      pumpRef.current = null;
+    }
     if (ctxRef.current && ctxRef.current.state !== 'closed') {
       ctxRef.current.close();
       ctxRef.current = null;
     }
+    analyserRef.current = null;
   }
 
   return { playChunk, flush, stop };
