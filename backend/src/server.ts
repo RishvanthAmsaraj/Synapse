@@ -5,6 +5,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { GoogleGenAI, Modality, FunctionResponseScheduling } from '@google/genai';
 import { TOOL_DECLARATIONS } from './tools.js';
 import { validate, isError } from './validator.js';
+import { fetchWikipediaImage } from './images.js';
 
 // gemini-2.5-flash-native-audio-preview-12-2025 supports NON_BLOCKING tool calls
 const MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
@@ -49,103 +50,8 @@ When someone wants to LEARN a concept: give a 3-4 sentence overview out loud whi
 After any interruption: if canvas state contains "highlights cleared", re-call code_viewer_next_highlight at the start of your next response for every section you are about to discuss — highlights do not survive interruptions.`;
 
 // ---------------------------------------------------------------------------
-// Image search — Wikipedia REST + Wikimedia Commons, cached, no API key
+// Image search — see images.ts (extracted for modularity + testability)
 // ---------------------------------------------------------------------------
-
-// Successful lookups are cached so repeat queries are instant and
-// rate-limiter-friendly. Failed lookups are NOT cached (a retry with a
-// slightly different query may succeed).
-const imageCache = new Map<string, string>();
-
-// Wikipedia asks for a descriptive User-Agent; a generic one gets
-// throttled after a handful of requests (the "stuck on one picture"
-// symptom). A proper UA keeps successive lookups working.
-const UA_HEADERS = {
-  'User-Agent': 'SynapseEdu/1.0 (voice-first educational canvas; personal project)',
-  'Accept': 'application/json',
-};
-
-/** Fetch a URL with a timeout (AbortController). Returns null on any failure. */
-async function fetchJsonWithTimeout(url: string, timeoutMs = 8000): Promise<any | null> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, { headers: UA_HEADERS, signal: controller.signal });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (e) {
-    return null;
-  }
-}
-
-/** Strip filler words so the query can hit a real article/title. */
-function cleanQuery(query: string): string {
-  const cleaned = query
-    .replace(/\b(diagram|visualization|algorithm|chart|image|picture|example|illustration|concept|overview|a|an|the|of)\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim() || query;
-  return cleaned;
-}
-
-async function fetchWikipediaImage(query: string): Promise<string | null> {
-  const cleaned = cleanQuery(query);
-
-  // 1) Cache hit — instant, never re-hits the network.
-  const cached = imageCache.get(cleaned.toLowerCase());
-  if (cached) {
-    console.log(`[wikipedia] cache hit: "${cleaned}"`);
-    return cached;
-  }
-
-  // 2) Fast path: REST summary resolves the title + thumbnail in one call.
-  const summary = await fetchJsonWithTimeout(
-    `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(cleaned)}`
-  );
-  if (summary?.thumbnail?.source) {
-    imageCache.set(cleaned.toLowerCase(), summary.thumbnail.source);
-    console.log(`[wikipedia] REST hit: "${summary.title}" → ${summary.thumbnail.source}`);
-    return summary.thumbnail.source;
-  }
-
-  // 3) Wikimedia Commons search — a different corpus that frequently has
-  //    a diagram/photo where the encyclopedia REST API doesn't.
-  const commons = await fetchJsonWithTimeout(
-    `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(cleaned)}&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json`
-  );
-  if (commons?.query?.pages) {
-    const pages = Object.values(commons.query.pages) as any[];
-    for (const page of pages) {
-      const info = page?.imageinfo?.[0];
-      const url = (info?.thumburl || info?.url) as string | undefined;
-      if (url && /\.(jpe?g|png|svg|gif|webp)$/i.test(url)) {
-        imageCache.set(cleaned.toLowerCase(), url);
-        console.log(`[wikipedia] Commons hit: "${page.title}" → ${url}`);
-        return url;
-      }
-    }
-  }
-
-  // 4) Fallback: opensearch for the best matching article title.
-  const searchData = await fetchJsonWithTimeout(
-    `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(cleaned)}&limit=3&format=json`
-  ) as [string, string[]] | null;
-  const titles = searchData?.[1] ?? [];
-  for (const title of titles) {
-    const fallback = await fetchJsonWithTimeout(
-      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`
-    );
-    const url = fallback?.thumbnail?.source as string | undefined;
-    if (url) {
-      imageCache.set(cleaned.toLowerCase(), url);
-      console.log(`[wikipedia] opensearch fallback: "${title}" → ${url}`);
-      return url;
-    }
-  }
-
-  console.warn(`[wikipedia] no image found for "${cleaned}" (tried REST, Commons, opensearch)`);
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // HTTP + WebSocket server
