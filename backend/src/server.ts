@@ -17,83 +17,134 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY!,
 });
 
-const SYSTEM_PROMPT = `You are Synapse — a knowledgeable, friendly voice assistant with a live visual canvas that updates silently as you speak. You can discuss ANY topic: computer science, algorithms, math, science, history, writing, general knowledge, or anything the user is curious about. No topic is off-limits and no rigid script is required.
+const SYSTEM_PROMPT = `You are Synapse — a warm, quick-witted, endlessly curious voice assistant with a live visual canvas that updates silently as you speak. You feel like talking to a brilliant friend: genuine warmth, plain language, a little dry humor when it lands. Never saccharine, never robotic. You can discuss ANY topic: computer science, algorithms, math, science, history, writing, general knowledge, or anything the user is curious about.
+
+═══ MATCH THE MEDIUM TO THE REQUEST (most important rule) ═══
+Decide what the user actually asked for and give them THAT first. Do not default to a spoken explanation with a text panel — mirror the request:
+- They ask to SEE something ("show me a picture of X", "what does X look like") → image_show fires immediately, and your speech is a short caption for it. The picture is the answer.
+- They ask for an EXPLANATION ("explain X", "how does X work") → text_show with structured key points while you explain out loud.
+- They ask for CODE ("write me X", "show me the code") → code_viewer_show with the code while you walk through it.
+- They ask for a QUICK FACT ("what is X?", "who is Y?") → just answer conversationally; a short text_show only if structure genuinely helps.
+- Chit-chat, greetings, feelings → voice only. No canvas unless it naturally adds value.
+
+When a conversation drifts to a new medium (they ask for a picture after an explanation, or vice versa), switch without ceremony — add the new widget and let the canvas refocus.
 
 ═══ CONVERSATION STYLE ═══
-Speak naturally and conversationally, in complete, unhurried sentences. Do not cut yourself off, and let each turn be a clean, finished thought. Answer the question the user actually asked. If a question is vague, briefly ask what they'd like to focus on — then follow up. Keep spoken answers tight for audio: lead with the answer, then the reasoning. No bullet reading, no "as I mentioned", no meta commentary.
+Speak naturally and conversationally, in complete, unhurried sentences. Answer the question asked — don't pad. For vague questions, ask one quick clarifying question, then follow up. Keep spoken answers tight for audio: lead with the answer, then reasoning. No bullet reading, no meta commentary. You are genuinely curious: when the user mentions something interesting, ask a follow-up now and then.
 
 ═══ CANVAS TOOL RULES ═══
 Tool calls are completely invisible to the user. Never announce one before it fires. Never acknowledge one after it fires. Never say "let me show you", "here is the code", "as you can see on screen", or anything similar. Your speech flows as if the canvas does not exist — it updates silently on its own.
 
-Use the canvas tools opportunistically to enrich whatever you are explaining:
-- text_show — the workhorse. Use it for key points, definitions, step breakdowns, structured summaries, comparisons, formulas. Markdown: ## headings, **bold**, - lists, nested lists. Any time you explain something with structure, put that structure on the canvas while you say the plain-spoken version out loud.
-- image_show — when a picture genuinely helps (diagrams, charts, shapes, landmarks, organisms, structures). Use the shortest accurate query, e.g. "binary search tree", "water cycle", "Colosseum".
-- code_viewer_show — whenever you show, write, or walk through real code. Use real newlines. Add code_viewer_next_highlight(start_line, end_line) calls — one per section, in the order you will explain them — so the code lights up as you teach.
+The canvas tools:
+- text_show — structured markdown (## headings, **bold**, - lists). text_show REPLACES the previous text panel, so the canvas never accumulates stale text tiles — put the latest key points in one panel.
+- image_show — when a picture helps. Shortest accurate query, e.g. "binary search tree", "water cycle", "Colosseum". image_show replaces the previous image. If it reports an error, the picture did NOT appear — try a different, simpler query rather than claiming a picture was shown.
+- code_viewer_show — whenever you show real code. Use real newlines. Add code_viewer_next_highlight(start_line, end_line) — one call per section, in order — so the code lights up as you teach.
+- clear_canvas — wipes every widget, returning to the bare orb. Call it when the user switches topics or asks to clear the screen (when they explicitly ask, you MUST call it — never just say you did). If the user wants to replace ONE widget (not everything), just re-issue that widget's tool — it replaces in place; no clear needed.
 
-After each of your responses you will receive a [canvas: ...] status line. This is silent system metadata — never read it aloud, never acknowledge it. If it says [canvas: empty] after you intended to show something, re-issue the tool call on your next turn.
+After each response you receive a [canvas: ...] status line — silent metadata, never read aloud. If it says [canvas: empty] after you intended to show something, re-issue the tool call next turn.
 
-═══ CANVAS MANAGEMENT ═══
-Call clear_canvas whenever the canvas content is no longer relevant: the user switches to a new topic, asks you to clear the screen, or a new concept replaces the old one. When the user explicitly asks to clear the canvas, you MUST call clear_canvas — do not merely say you cleared it. The canvas returns to the empty state (just the voice orb) and you bring up fresh widgets for the new topic as needed. When an image_show call reports an error, the image did NOT appear — retry once with a shorter or different query rather than claiming a picture was shown.
+═══ TEACHING (flexible — adapt, don't script) ═══
+When someone wants to LEARN a concept: give a 3-4 sentence overview out loud while firing text_show with the structured key points, then offer to go deeper or see a code implementation — and wait. If they say yes to code: fire code_viewer_show plus the ordered highlight calls, then walk through each section as it lights up. This is a pattern, not a script — a quick factual question never needs it, and a picture request never needs a text panel first.
 
-═══ TEACHING PATTERN (flexible — adapt, don't script) ═══
-When someone wants to LEARN a concept, not just get an answer, the flow that works best:
-1. Give a 3-4 sentence overview out loud while firing text_show with the structured key points (what it is, why it matters, how it works, complexity where relevant).
-2. Ask if they'd like to go deeper or see a code implementation. Stop and wait for their answer.
-3. If they say yes to code: fire code_viewer_show plus the ordered code_viewer_next_highlight calls, then walk through each section as it lights up.
-
-But this is a pattern, not a script. For quick factual questions ("what is X?", "why does Y happen?"), just answer conversationally — a short text_show if structure helps. For chit-chat, greetings, or personal questions, skip the canvas entirely unless it naturally adds value.
-
-When discussing code, always show it via code_viewer_show. After any interruption: if canvas state contains "highlights cleared", re-call code_viewer_next_highlight at the start of your next response for every section you are about to discuss — highlights do not survive interruptions.`;
+After any interruption: if canvas state contains "highlights cleared", re-call code_viewer_next_highlight at the start of your next response for every section you are about to discuss — highlights do not survive interruptions.`;
 
 // ---------------------------------------------------------------------------
-// Wikipedia image search — no API key required
+// Image search — Wikipedia REST + Wikimedia Commons, cached, no API key
 // ---------------------------------------------------------------------------
-async function fetchWikipediaImage(query: string): Promise<string | null> {
+
+// Successful lookups are cached so repeat queries are instant and
+// rate-limiter-friendly. Failed lookups are NOT cached (a retry with a
+// slightly different query may succeed).
+const imageCache = new Map<string, string>();
+
+// Wikipedia asks for a descriptive User-Agent; a generic one gets
+// throttled after a handful of requests (the "stuck on one picture"
+// symptom). A proper UA keeps successive lookups working.
+const UA_HEADERS = {
+  'User-Agent': 'SynapseEdu/1.0 (voice-first educational canvas; personal project)',
+  'Accept': 'application/json',
+};
+
+/** Fetch a URL with a timeout (AbortController). Returns null on any failure. */
+async function fetchJsonWithTimeout(url: string, timeoutMs = 8000): Promise<any | null> {
   try {
-    const headers = { 'User-Agent': 'Synapse/1.0 (educational demo)' };
-
-    // Strip generic filler words so we hit a real Wikipedia article title
-    const cleaned = query
-      .replace(/\b(diagram|visualization|algorithm|chart|image|picture|example|illustration|concept|overview)\b/gi, '')
-      .replace(/\s+/g, ' ')
-      .trim() || query;
-
-    // Fast path: REST summary API resolves the title and returns a thumbnail in one call
-    const summaryRes = await fetch(
-      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(cleaned)}`,
-      { headers }
-    );
-    if (summaryRes.ok) {
-      const data = await summaryRes.json() as { thumbnail?: { source: string }; title?: string };
-      if (data.thumbnail?.source) {
-        console.log(`[wikipedia] direct hit: "${data.title}" → ${data.thumbnail.source}`);
-        return data.thumbnail.source;
-      }
-    }
-
-    // Fallback: opensearch for the best matching title, then REST summary
-    const searchRes = await fetch(
-      `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(cleaned)}&limit=1&format=json`,
-      { headers }
-    );
-    if (!searchRes.ok) return null;
-    const searchData = await searchRes.json() as [string, string[]];
-    const title = searchData[1]?.[0];
-    if (!title) { console.warn(`[wikipedia] no article found for "${cleaned}"`); return null; }
-
-    const fallbackRes = await fetch(
-      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
-      { headers }
-    );
-    if (!fallbackRes.ok) return null;
-    const fallbackData = await fallbackRes.json() as { thumbnail?: { source: string }; title?: string };
-    const url = fallbackData.thumbnail?.source ?? null;
-    console.log(`[wikipedia] fallback: "${title}" → ${url ?? 'no image'}`);
-    return url;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(url, { headers: UA_HEADERS, signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    return await res.json();
   } catch (e) {
-    console.error('[wikipedia] fetch error:', e);
     return null;
   }
+}
+
+/** Strip filler words so the query can hit a real article/title. */
+function cleanQuery(query: string): string {
+  const cleaned = query
+    .replace(/\b(diagram|visualization|algorithm|chart|image|picture|example|illustration|concept|overview|a|an|the|of)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim() || query;
+  return cleaned;
+}
+
+async function fetchWikipediaImage(query: string): Promise<string | null> {
+  const cleaned = cleanQuery(query);
+
+  // 1) Cache hit — instant, never re-hits the network.
+  const cached = imageCache.get(cleaned.toLowerCase());
+  if (cached) {
+    console.log(`[wikipedia] cache hit: "${cleaned}"`);
+    return cached;
+  }
+
+  // 2) Fast path: REST summary resolves the title + thumbnail in one call.
+  const summary = await fetchJsonWithTimeout(
+    `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(cleaned)}`
+  );
+  if (summary?.thumbnail?.source) {
+    imageCache.set(cleaned.toLowerCase(), summary.thumbnail.source);
+    console.log(`[wikipedia] REST hit: "${summary.title}" → ${summary.thumbnail.source}`);
+    return summary.thumbnail.source;
+  }
+
+  // 3) Wikimedia Commons search — a different corpus that frequently has
+  //    a diagram/photo where the encyclopedia REST API doesn't.
+  const commons = await fetchJsonWithTimeout(
+    `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(cleaned)}&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json`
+  );
+  if (commons?.query?.pages) {
+    const pages = Object.values(commons.query.pages) as any[];
+    for (const page of pages) {
+      const info = page?.imageinfo?.[0];
+      const url = (info?.thumburl || info?.url) as string | undefined;
+      if (url && /\.(jpe?g|png|svg|gif|webp)$/i.test(url)) {
+        imageCache.set(cleaned.toLowerCase(), url);
+        console.log(`[wikipedia] Commons hit: "${page.title}" → ${url}`);
+        return url;
+      }
+    }
+  }
+
+  // 4) Fallback: opensearch for the best matching article title.
+  const searchData = await fetchJsonWithTimeout(
+    `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(cleaned)}&limit=3&format=json`
+  ) as [string, string[]] | null;
+  const titles = searchData?.[1] ?? [];
+  for (const title of titles) {
+    const fallback = await fetchJsonWithTimeout(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`
+    );
+    const url = fallback?.thumbnail?.source as string | undefined;
+    if (url) {
+      imageCache.set(cleaned.toLowerCase(), url);
+      console.log(`[wikipedia] opensearch fallback: "${title}" → ${url}`);
+      return url;
+    }
+  }
+
+  console.warn(`[wikipedia] no image found for "${cleaned}" (tried REST, Commons, opensearch)`);
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +164,10 @@ wss.on('connection', async (browserWs) => {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let geminiSession: any = null;
+  // Transparent recovery: when Gemini drops the session (rate limit,
+  // timeout, transient error), the proxy silently creates a fresh one
+  // on the SAME browser WebSocket — the user sees no disconnect.
+  let recoveryAttempts = 0;
 
   const safeSend = (payload: object) => {
     if (browserWs.readyState === WebSocket.OPEN) {
@@ -124,7 +179,7 @@ wss.on('connection', async (browserWs) => {
     }
   };
 
-  try {
+  const startGeminiSession = async (isRecovery: boolean) => {
     geminiSession = await ai.live.connect({
       model: MODEL,
       config: {
@@ -141,8 +196,9 @@ wss.on('connection', async (browserWs) => {
       },
       callbacks: {
         onopen: () => {
-          console.log('[proxy] Gemini session open');
-          safeSend({ type: 'ready' });
+          recoveryAttempts = 0;
+          console.log(`[proxy] Gemini session open${isRecovery ? ' (recovered)' : ''}`);
+          safeSend({ type: isRecovery ? 'session_recovered' : 'ready' });
         },
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -250,14 +306,35 @@ wss.on('connection', async (browserWs) => {
 
         onclose: () => {
           console.log('[proxy] Gemini session closed');
-          // Signal the browser so the frontend can reconnect cleanly
-          // (rate limits / session timeouts / transient API errors all
-          // land here; the UI reconnects and keeps the mic live).
-          safeSend({ type: 'session_closed' });
-          if (browserWs.readyState === WebSocket.OPEN) browserWs.close();
+          if (browserWs.readyState !== WebSocket.OPEN) return;
+          // Transparent recovery: recreate the Gemini session on this same
+          // browser connection instead of dropping it. Only after repeated
+          // failures do we signal the browser (whose own auto-reconnect
+          // then takes over as a last resort).
+          if (recoveryAttempts >= 3) {
+            console.log('[proxy] recovery attempts exhausted — closing browser WS');
+            safeSend({ type: 'session_closed' });
+            browserWs.close();
+            return;
+          }
+          recoveryAttempts += 1;
+          const delay = Math.min(1500 * 2 ** (recoveryAttempts - 1), 8000);
+          console.log(`[proxy] recovering Gemini session in ${delay}ms (attempt ${recoveryAttempts}/3)`);
+          setTimeout(() => {
+            if (browserWs.readyState !== WebSocket.OPEN) return;
+            startGeminiSession(true).catch((err) => {
+              console.error('[proxy] recovery connect failed:', err);
+              safeSend({ type: 'session_closed' });
+              browserWs.close();
+            });
+          }, delay);
         },
       },
     });
+  };
+
+  try {
+    await startGeminiSession(false);
   } catch (err) {
     console.error('[proxy] Failed to connect to Gemini:', err);
     browserWs.close();

@@ -62,6 +62,9 @@ function AppInner() {
   const inventoryRef = useRef(getInventoryString);
   useEffect(() => { inventoryRef.current = getInventoryString; }, [getInventoryString]);
 
+  // Track the active text widget ID so we replace rather than stack
+  const textWidgetIdRef = useRef<string | null>(null);
+
   // Track the active image widget ID so we replace rather than stack
   const imageWidgetIdRef = useRef<string | null>(null);
 
@@ -216,8 +219,15 @@ function AppInner() {
         case 'text_show': {
           const { content } = call.args as { content: string };
           const data: TextWidgetData = { content };
-          const id = addWidget('text', data, 2, 2);
-          focusWidget(id);
+          // Replace in place: one text panel that always shows the latest
+          // key points — the canvas never accumulates stale text tiles.
+          if (textWidgetIdRef.current) {
+            updateWidget(textWidgetIdRef.current, data);
+          } else {
+            const id = addWidget('text', data, 2, 2);
+            textWidgetIdRef.current = id;
+          }
+          if (textWidgetIdRef.current) focusWidget(textWidgetIdRef.current);
           break;
         }
 
@@ -345,6 +355,7 @@ function AppInner() {
           clearWidgets();
           codeViewerIdRef.current = null;
           codeViewerDataRef.current = { language: '', code: '' };
+          textWidgetIdRef.current = null;
           imageWidgetIdRef.current = null;
           callStackIdRef.current = null;
           callStackDataRef.current = { frames: [], overflow: false };
@@ -434,6 +445,7 @@ function AppInner() {
     highlightsClearedRef.current = false;
     codeViewerIdRef.current = null;
     codeViewerDataRef.current = { language: '', code: '' };
+    textWidgetIdRef.current = null;
     imageWidgetIdRef.current = null;
     callStackIdRef.current = null;
     callStackDataRef.current = { frames: [], overflow: false };
