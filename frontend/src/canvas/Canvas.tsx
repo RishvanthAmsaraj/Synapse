@@ -1,23 +1,16 @@
 import { useEffect, useRef } from 'react';
 import { useCanvas } from './CanvasProvider';
-import { CodeViewer, type CodeViewerData } from '../widgets/CodeViewer';
-import { CallStack, type CallStackData } from '../widgets/CallStack';
-import { ImageWidget, type ImageWidgetData } from '../widgets/ImageWidget';
-import { TextWidget, type TextWidgetData } from '../widgets/TextWidget';
-import { TerminalWidget, type TerminalWidgetData } from '../widgets/TerminalWidget';
+import { getWidget } from '../widgets/registry';
 import './Canvas.css';
 
 /**
  * Canvas — The visual stage where all widgets are rendered.
- * 
+ *
  * Widgets are laid out in a responsive grid. Each widget specifies
  * its column/row span via the cols/rows properties.
- * 
- * To add a new widget type:
- * 1. Create the component in ../widgets/
- * 2. Add its data type export
- * 3. Register it in renderWidget() below
- * 4. Add the tool declaration in backend/src/tools.ts
+ *
+ * Rendering is driven by the widget registry (../widgets/registry.ts) —
+ * add a component + a registry entry, and it renders here with no switch to edit.
  */
 
 export function Canvas() {
@@ -59,23 +52,14 @@ export function Canvas() {
 }
 
 /**
- * Widget renderer — maps widget types to their components.
- * Add new widget types here.
+ * Widget renderer — looks up the component in the registry and renders it.
  */
 function renderWidget(type: string, data: unknown) {
-  switch (type) {
-    case 'code_viewer':
-      return <CodeViewer data={data as CodeViewerData} />;
-    case 'call_stack':
-      return <CallStack data={data as CallStackData} />;
-    case 'image':
-      return <ImageWidget data={data as ImageWidgetData} />;
-    case 'text':
-      return <TextWidget data={data as TextWidgetData} />;
-    case 'terminal':
-      return <TerminalWidget data={data as TerminalWidgetData} />;
-    default:
-      console.warn(`[Canvas] Unknown widget type: "${type}"`);
-      return null;
+  const def = getWidget(type);
+  if (!def) {
+    console.warn(`[Canvas] Unknown widget type: "${type}"`);
+    return null;
   }
+  const Comp = def.component;
+  return <Comp data={data} />;
 }

@@ -1,68 +1,31 @@
 /**
- * Validation layer — sits between Gemini and the canvas.
+ * Validation layer — sits between the model and the canvas.
  * The model is treated as an untrusted external service.
  * Every tool call is checked before it touches state.
+ *
+ * The argument spec is DERIVED from TOOL_SPECS in tools.ts, so there is a
+ * single source of truth for tool signatures — no separate hand-maintained
+ * registry to drift out of sync.
  */
+
+import { TOOL_SPECS } from './tools.js';
 
 type ArgType = 'string' | 'number' | 'boolean' | 'object';
 
-interface ArgSpec {
-  type: ArgType;
-  required: boolean;
-}
-
 interface ToolSpec {
-  args: Record<string, ArgSpec>;
+  args: Record<string, { type: ArgType; required: boolean }>;
 }
 
-// Registry mirrors TOOL_DECLARATIONS in tools.ts.
-const REGISTRY: Record<string, ToolSpec> = {
-  // Code Viewer
-  code_viewer_show: {
-    args: {
-      language: { type: 'string', required: true },
-      code:     { type: 'string', required: true },
+const REGISTRY: Record<string, ToolSpec> = Object.fromEntries(
+  TOOL_SPECS.map((spec) => [
+    spec.name,
+    {
+      args: Object.fromEntries(
+        spec.params.map((p) => [p.name, { type: p.type, required: p.required !== false }]),
+      ),
     },
-  },
-  code_viewer_next_highlight: {
-    args: {
-      start_line: { type: 'number', required: true },
-      end_line:   { type: 'number', required: true },
-    },
-  },
-
-  // Text
-  text_show: {
-    args: {
-      content: { type: 'string', required: true },
-    },
-  },
-
-  // Image
-  image_show: {
-    args: {
-      query: { type: 'string', required: true },
-    },
-  },
-
-  // Canvas management
-  clear_canvas: {
-    args: {},
-  },
-
-  // Call Stack — BOXED (disabled, component preserved)
-
-  // Execution Stream
-  exec_python: {
-    args: {
-      code:        { type: 'string', required: true },
-      description: { type: 'string', required: true },
-    },
-  },
-  exec_clear: {
-    args: {},
-  },
-};
+  ]),
+);
 
 export interface ValidatedCall {
   name: string;

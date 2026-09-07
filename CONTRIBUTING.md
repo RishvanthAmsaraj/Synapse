@@ -37,12 +37,15 @@ npm run dev:backend
 
 ## Adding a New Widget
 
-1. **Create widget component** in `frontend/src/widgets/MyWidget.tsx`
-2. **Export data type** for the widget's props
-3. **Register in Canvas.tsx** — add case to `renderWidget()`
-4. **Add tool declaration** in `backend/src/tools.ts`
-5. **Add validator** in `backend/src/validator.ts`
-6. **Test** with the agent
+The widget SDK is declarative — three steps, no parallel lists to keep in sync:
+
+1. **Create the component** in `frontend/src/widgets/MyWidget.tsx` (takes `{ data }`).
+2. **Register it** in `frontend/src/widgets/registry.ts` (type → component + default grid span).
+3. **Add a `ToolSpec`** in `backend/src/tools.ts` (name, widgetType, description, params).
+
+The Gemini tool declaration **and** the validator spec are generated automatically
+from the `ToolSpec`; `Canvas.tsx` renders from the registry. No switch statement or
+validator entry to edit.
 
 ## Code Style
 
