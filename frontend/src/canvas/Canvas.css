@@ -1,9 +1,12 @@
-/* Canvas — floating glass filmstrip of widgets */
+/* Canvas — fluid modular grid of widgets.
+   Cells flex-grow/shrink smoothly: the contextually relevant widget
+   expands to own the stage while the others compact to slim columns,
+   like a Jarvis-style modular dashboard. */
 
 .canvas-scroll {
   flex-shrink: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 4px 24px 8px;
   position: relative;
   z-index: 5;
@@ -12,17 +15,17 @@
 
 .canvas-grid {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
-  width: max-content;
-  height: 100%;
-  align-items: stretch;
+  width: 100%;
+  align-content: flex-start;
   padding: 4px 2px 10px;
 }
 
 .canvas-cell {
-  flex-shrink: 0;
-  height: 100%;
-  min-height: 320px;
+  flex: 1 1 240px;
+  min-width: 200px;
+  height: 340px;
   background: var(--glass);
   border: 1px solid var(--glass-border);
   border-radius: 16px;
@@ -30,29 +33,38 @@
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
-  transition: border-color 0.3s, transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.3s, opacity 0.3s, filter 0.3s;
+  transition:
+    flex-grow 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    flex-basis 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.35s ease,
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.35s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
 }
 
-/* The contextually relevant widget — full presence, gently elevated */
+/* The contextually relevant widget — owns the stage */
 .canvas-cell.focused {
+  flex-grow: 3.2;
+  flex-basis: 380px;
   border-color: var(--accent-border);
-  transform: translateY(-2px) scale(1.015);
+  transform: translateY(-2px) scale(1.01);
   box-shadow:
     0 14px 44px rgba(0, 0, 0, 0.45),
     0 0 32px var(--orb-glow-soft);
 }
 
-/* Everything else takes a back seat until the conversation turns to it */
+/* Everything else compacts into slim columns until it's needed again */
 .canvas-cell.dimmed {
-  opacity: 0.42;
-  transform: scale(0.955);
+  flex-grow: 1;
+  flex-basis: 200px;
+  opacity: 0.45;
   filter: saturate(0.65);
+  transform: scale(0.97);
 }
 .canvas-cell.dimmed:hover {
-  opacity: 0.9;
+  opacity: 0.92;
   border-color: var(--accent-border);
-  transform: translateY(-2px) scale(0.97);
   filter: saturate(1);
   box-shadow:
     0 14px 44px rgba(0, 0, 0, 0.45),

@@ -45,6 +45,11 @@ const REGISTRY: Record<string, ToolSpec> = {
     },
   },
 
+  // Canvas management
+  clear_canvas: {
+    args: {},
+  },
+
   // Call Stack — BOXED (disabled, component preserved)
 
   // Execution Stream

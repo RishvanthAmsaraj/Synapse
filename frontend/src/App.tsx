@@ -198,7 +198,9 @@ function AppInner() {
         // ── Image ────────────────────────────────────────────────────
         case 'image_show': {
           const { query, url } = call.args as { query: string; url: string | null };
-          if (!url) break;
+          // Always reflect the latest request — even a failed lookup gets
+          // shown as a "not found" tile so the user never stares at a stale
+          // picture the agent claims to have replaced.
           const data: ImageWidgetData = { query, url };
           if (imageWidgetIdRef.current) {
             updateWidget(imageWidgetIdRef.current, data);
@@ -336,9 +338,25 @@ function AppInner() {
           }
           break;
         }
+
+        // ── Canvas management ────────────────────────────────────────
+        case 'clear_canvas': {
+          clearPendingHighlights();
+          clearWidgets();
+          codeViewerIdRef.current = null;
+          codeViewerDataRef.current = { language: '', code: '' };
+          imageWidgetIdRef.current = null;
+          callStackIdRef.current = null;
+          callStackDataRef.current = { frames: [], overflow: false };
+          frameCounterRef.current = 0;
+          execTerminalIdRef.current = null;
+          execTerminalDataRef.current = { blocks: [] };
+          execBlockCounterRef.current = 0;
+          break;
+        }
       }
     },
-    [addWidget, removeWidget, updateWidget, focusWidget, addLog]
+    [addWidget, removeWidget, updateWidget, focusWidget, clearWidgets, addLog]
   );
 
   const { connect, disconnect, sendAudio, sendContext, status } = useLiveSession({
@@ -407,6 +425,10 @@ function AppInner() {
     stopMic();
     disconnect();
     stop();
+    clearCanvasNow();
+  }
+
+  function clearCanvasNow() {
     clearWidgets();
     clearPendingHighlights();
     highlightsClearedRef.current = false;
@@ -475,7 +497,10 @@ function AppInner() {
                 <Orb status={status} listening={isRecording} mini peakRef={audioPeakRef} />
                 {statusEl}
               </div>
-              <div className="session-controls">{sessionControls}</div>
+              <div className="session-controls">
+                <button className="btn btn-clear" onClick={clearCanvasNow} disabled={!hasWidgets}>Clear canvas</button>
+                {sessionControls}
+              </div>
             </div>
           </>
         )}

@@ -32,6 +32,9 @@ Use the canvas tools opportunistically to enrich whatever you are explaining:
 
 After each of your responses you will receive a [canvas: ...] status line. This is silent system metadata — never read it aloud, never acknowledge it. If it says [canvas: empty] after you intended to show something, re-issue the tool call on your next turn.
 
+═══ CANVAS MANAGEMENT ═══
+Call clear_canvas whenever the canvas content is no longer relevant: the user switches to a new topic, asks you to clear the screen, or a new concept replaces the old one. When the user explicitly asks to clear the canvas, you MUST call clear_canvas — do not merely say you cleared it. The canvas returns to the empty state (just the voice orb) and you bring up fresh widgets for the new topic as needed. When an image_show call reports an error, the image did NOT appear — retry once with a shorter or different query rather than claiming a picture was shown.
+
 ═══ TEACHING PATTERN (flexible — adapt, don't script) ═══
 When someone wants to LEARN a concept, not just get an answer, the flow that works best:
 1. Give a 3-4 sentence overview out loud while firing text_show with the structured key points (what it is, why it matters, how it works, complexity where relevant).
@@ -203,7 +206,11 @@ wss.on('connection', async (browserWs) => {
                   responses.push({
                     id: fc.id,
                     name: fc.name,
-                    response: { result: 'ok', url: imageUrl ?? '' },
+                    // Tell the model the truth: if no image was found, it must
+                    // know its tool call did not produce a visual.
+                    response: imageUrl
+                      ? { result: 'ok', url: imageUrl }
+                      : { result: 'error', message: `No image found for "${query}". Try a shorter or more general query.` },
                     scheduling: FunctionResponseScheduling.SILENT,
                   });
                 } else {
@@ -243,6 +250,10 @@ wss.on('connection', async (browserWs) => {
 
         onclose: () => {
           console.log('[proxy] Gemini session closed');
+          // Signal the browser so the frontend can reconnect cleanly
+          // (rate limits / session timeouts / transient API errors all
+          // land here; the UI reconnects and keeps the mic live).
+          safeSend({ type: 'session_closed' });
           if (browserWs.readyState === WebSocket.OPEN) browserWs.close();
         },
       },

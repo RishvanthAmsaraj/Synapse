@@ -483,6 +483,7 @@ html, body {
 }
 
 .btn {
+  /* ghost control button base */
   padding: 11px 30px;
   border: 1px solid transparent;
   border-radius: 9999px;
@@ -522,6 +523,20 @@ html, body {
   border-color: var(--danger);
   color: var(--danger);
   background: rgba(229, 83, 75, 0.1);
+}
+
+.btn-clear {
+  padding: 9px 18px;
+  font-size: 12px;
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.btn-clear:not(:disabled):hover {
+  color: var(--text);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
 }
 
 /* ===== Scrollbar ===== */

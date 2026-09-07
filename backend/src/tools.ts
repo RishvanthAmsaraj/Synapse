@@ -106,6 +106,21 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
     },
   },
 
+  {
+    name: 'clear_canvas',
+    description:
+      'Clear every widget from the visual canvas, returning it to the empty state with just the voice orb. ' +
+      'Call this whenever the user switches topic, asks you to clear the screen, or when the ' +
+      'currently displayed widgets are no longer relevant to the conversation. ' +
+      'Fresh widgets for the new topic should be brought up afterwards if the new topic needs them.',
+    behavior: Behavior.NON_BLOCKING,
+    parameters: {
+      type: Type.OBJECT,
+      properties: {},
+      required: [],
+    },
+  },
+
   // ------------------------------------------------------------------
   // Call Stack — BOXED (disabled, component preserved)
   // ------------------------------------------------------------------

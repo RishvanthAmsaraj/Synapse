@@ -14,10 +14,13 @@ export function ImageWidget({ data }: { data: ImageWidgetData }) {
     return (
       <div style={{
         width: '100%', height: '100%',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        display: 'flex', flexDirection: 'column', gap: 8,
+        alignItems: 'center', justifyContent: 'center',
+        textAlign: 'center', padding: '0 18px',
         background: 'var(--surface)', color: 'var(--text-muted)', fontSize: 13, fontFamily: 'var(--font-mono)',
       }}>
-        Searching for &ldquo;{data.query}&rdquo;&hellip;
+        <span>No image found</span>
+        <span style={{ opacity: 0.65 }}>&ldquo;{data.query}&rdquo;</span>
       </div>
     );
   }

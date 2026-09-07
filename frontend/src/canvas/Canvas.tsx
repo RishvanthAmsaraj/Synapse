@@ -47,10 +47,7 @@ export function Canvas() {
             <div
               key={widget.id}
               ref={isFocused ? focusedRef : undefined}
-              className={`canvas-cell${isFocused ? ' focused' : widgets.length > 1 ? ' dimmed' : ''}`}
-              style={{
-                width: widget.cols >= 2 ? 560 : 420,
-              }}
+              className={`canvas-cell${isFocused ? ' focused' : widgets.length > 1 ? ' dimmed' : ''}${widget.cols >= 2 ? ' wide' : ''}`}
             >
               {renderWidget(widget.type, widget.data)}
             </div>
