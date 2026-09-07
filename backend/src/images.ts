@@ -3,12 +3,19 @@
 //
 // Extracted into its own module so the query-normalization + search ladder is
 // unit-testable without booting the HTTP/WebSocket server. See images.test.ts.
+//
+// Returns MULTIPLE candidate URLs per query so the frontend can fall back to
+// the next image if one fails to load (the "pull up a different one" behavior).
 // ---------------------------------------------------------------------------
 
 // Successful lookups are cached so repeat queries are instant and
 // rate-limiter-friendly. Failed lookups are NOT cached (a retry with a
-// slightly different query may succeed).
-const imageCache = new Map<string, string>();
+// slightly different query may succeed). Maps query → candidate URLs.
+const imageCache = new Map<string, string[]>();
+
+// Cap on how many distinct candidate URLs we hand back per query. Enough to
+// survive a dead link or two without flooding the canvas or the network.
+const MAX_CANDIDATES = 5;
 
 // Wikipedia asks for a descriptive User-Agent; a generic one gets throttled
 // after a handful of requests (the "stuck on one picture" symptom). A proper
@@ -81,29 +88,33 @@ export function buildQueryLadder(query: string): string[] {
   return [...new Set(ladder)];
 }
 
-/** Search one candidate query across REST → Commons → opensearch. */
-async function searchImage(candidate: string): Promise<string | null> {
+/** Search one candidate query; returns every usable image URL found. */
+async function searchImages(candidate: string): Promise<string[]> {
   const key = candidate.toLowerCase();
 
   // Cache hit — instant, never re-hits the network.
   const cached = imageCache.get(key);
   if (cached) {
-    console.log(`[wikipedia] cache hit: "${candidate}"`);
+    console.log(`[wikipedia] cache hit: "${candidate}" (${cached.length})`);
     return cached;
   }
 
-  // Fast path: REST summary resolves the title + thumbnail in one call.
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  const push = (u?: string) => {
+    if (u && !seen.has(u)) {
+      seen.add(u);
+      urls.push(u);
+    }
+  };
+
+  // Fast path: REST summary thumbnail.
   const summary = await fetchJsonWithTimeout(
     `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(candidate)}`
   );
-  if (summary?.thumbnail?.source) {
-    imageCache.set(key, summary.thumbnail.source);
-    console.log(`[wikipedia] REST hit: "${summary.title}" → ${summary.thumbnail.source}`);
-    return summary.thumbnail.source;
-  }
+  push(summary?.thumbnail?.source);
 
-  // Wikimedia Commons search — a different corpus that frequently has
-  //    a diagram/photo where the encyclopedia REST API doesn't.
+  // Wikimedia Commons — collect ALL matching images, not just the first.
   const commons = await fetchJsonWithTimeout(
     `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(candidate)}&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json`
   );
@@ -112,15 +123,11 @@ async function searchImage(candidate: string): Promise<string | null> {
     for (const page of pages) {
       const info = page?.imageinfo?.[0];
       const url = (info?.thumburl || info?.url) as string | undefined;
-      if (url && /\.(jpe?g|png|svg|gif|webp)$/i.test(url)) {
-        imageCache.set(key, url);
-        console.log(`[wikipedia] Commons hit: "${page.title}" → ${url}`);
-        return url;
-      }
+      if (url && /\.(jpe?g|png|svg|gif|webp)$/i.test(url)) push(url);
     }
   }
 
-  // Fallback: opensearch for the best matching article title.
+  // Fallback: opensearch for the best matching article titles.
   const searchData = (await fetchJsonWithTimeout(
     `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(candidate)}&limit=3&format=json`
   )) as [string, string[]] | null;
@@ -129,38 +136,38 @@ async function searchImage(candidate: string): Promise<string | null> {
     const fallback = await fetchJsonWithTimeout(
       `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`
     );
-    const url = fallback?.thumbnail?.source as string | undefined;
-    if (url) {
-      imageCache.set(key, url);
-      console.log(`[wikipedia] opensearch fallback: "${title}" → ${url}`);
-      return url;
-    }
+    push(fallback?.thumbnail?.source);
   }
 
-  return null;
+  if (urls.length > 0) {
+    imageCache.set(key, urls);
+    console.log(`[wikipedia] "${candidate}" → ${urls.length} candidate(s)`);
+  }
+  return urls;
 }
 
 /**
- * Fetch an image for a conversational query, walking the query ladder from
- * most- to least-specific until one rung resolves. Returns null only when
- * every rung misses.
+ * Fetch candidate images for a conversational query, walking the query ladder
+ * from most- to least-specific until we collect enough URLs (or exhaust the
+ * ladder). Returns [] only when every rung misses.
  */
-export async function fetchWikipediaImage(query: string): Promise<string | null> {
-  const originalKey = cleanQuery(query).toLowerCase();
+export async function fetchWikipediaImages(query: string): Promise<string[]> {
   const ladder = buildQueryLadder(query);
+  const collected: string[] = [];
+  const seen = new Set<string>();
 
   for (const candidate of ladder) {
-    const url = await searchImage(candidate);
-    if (url) {
-      // Cache under the original query too, so a repeat "different X" request
-      // is an instant cache hit rather than walking the ladder again.
-      if (candidate.toLowerCase() !== originalKey) {
-        imageCache.set(originalKey, url);
+    for (const url of await searchImages(candidate)) {
+      if (!seen.has(url)) {
+        seen.add(url);
+        collected.push(url);
       }
-      return url;
     }
+    if (collected.length >= MAX_CANDIDATES) break;
   }
 
-  console.warn(`[wikipedia] no image found for "${query}" (ladder: ${ladder.join(' → ') || 'empty'})`);
-  return null;
+  if (collected.length === 0) {
+    console.warn(`[wikipedia] no image found for "${query}" (ladder: ${ladder.join(' → ') || 'empty'})`);
+  }
+  return collected.slice(0, MAX_CANDIDATES);
 }

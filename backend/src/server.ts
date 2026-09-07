@@ -5,7 +5,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { GoogleGenAI, Modality, FunctionResponseScheduling } from '@google/genai';
 import { TOOL_DECLARATIONS } from './tools.js';
 import { validate, isError } from './validator.js';
-import { fetchWikipediaImage } from './images.js';
+import { fetchWikipediaImages } from './images.js';
 
 // gemini-2.5-flash-native-audio-preview-12-2025 supports NON_BLOCKING tool calls
 const MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
@@ -162,16 +162,16 @@ wss.on('connection', async (browserWs) => {
                 // image_show needs an async Wikipedia fetch before we can forward to browser
                 if (result.name === 'image_show') {
                   const query = result.args.query as string;
-                  const imageUrl = await fetchWikipediaImage(query);
-                  console.log(`[wikipedia] query="${query}" → ${imageUrl ?? 'null'}`);
-                  safeSend({ type: 'tool_call', name: 'image_show', args: { query, url: imageUrl } });
+                  const urls = await fetchWikipediaImages(query);
+                  console.log(`[wikipedia] query="${query}" → ${urls.length} candidate(s)`);
+                  safeSend({ type: 'tool_call', name: 'image_show', args: { query, urls } });
                   responses.push({
                     id: fc.id,
                     name: fc.name,
                     // Tell the model the truth: if no image was found, it must
                     // know its tool call did not produce a visual.
-                    response: imageUrl
-                      ? { result: 'ok', url: imageUrl }
+                    response: urls.length
+                      ? { result: 'ok', count: urls.length }
                       : { result: 'error', message: `No image found for "${query}". Try a shorter or more general query.` },
                     scheduling: FunctionResponseScheduling.SILENT,
                   });

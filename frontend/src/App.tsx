@@ -200,11 +200,11 @@ function AppInner() {
 
         // ── Image ────────────────────────────────────────────────────
         case 'image_show': {
-          const { query, url } = call.args as { query: string; url: string | null };
+          const { query, urls } = call.args as { query: string; urls: string[] };
           // Always reflect the latest request — even a failed lookup gets
           // shown as a "not found" tile so the user never stares at a stale
           // picture the agent claims to have replaced.
-          const data: ImageWidgetData = { query, url };
+          const data: ImageWidgetData = { query, urls: urls ?? [] };
           if (imageWidgetIdRef.current) {
             updateWidget(imageWidgetIdRef.current, data);
           } else {

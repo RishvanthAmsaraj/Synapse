@@ -1,16 +1,26 @@
+import { useEffect, useState } from 'react';
+
 export type ImageWidgetData = {
   query: string;
-  url: string | null;
+  urls: string[];
 };
 
 /**
  * ImageWidget — Displays images and diagrams from Wikipedia.
- * 
- * Used by the agent to show visual illustrations that complement
- * the spoken explanation.
+ *
+ * The backend supplies multiple candidate URLs; if one fails to load, the
+ * widget advances to the next automatically instead of showing a broken tile.
  */
 export function ImageWidget({ data }: { data: ImageWidgetData }) {
-  if (!data.url) {
+  const urls = data.urls ?? [];
+  const [index, setIndex] = useState(0);
+
+  // Reset to the first candidate whenever a new query arrives.
+  useEffect(() => {
+    setIndex(0);
+  }, [data.query]);
+
+  if (urls.length === 0) {
     return (
       <div style={{
         width: '100%', height: '100%',
@@ -24,6 +34,10 @@ export function ImageWidget({ data }: { data: ImageWidgetData }) {
       </div>
     );
   }
+
+  // Guard against a new query that returns fewer candidates than the old index.
+  const currentIndex = Math.min(index, urls.length - 1);
+  const current = urls[currentIndex];
 
   return (
     // Outer div fills the cell and centers the square image
@@ -42,8 +56,12 @@ export function ImageWidget({ data }: { data: ImageWidgetData }) {
         borderRadius: 4,
       }}>
         <img
-          src={data.url}
+          src={current}
           alt={data.query}
+          onError={() => {
+            // Advance to the next candidate on load failure.
+            if (currentIndex < urls.length - 1) setIndex(currentIndex + 1);
+          }}
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
         />
         <div style={{
@@ -52,7 +70,7 @@ export function ImageWidget({ data }: { data: ImageWidgetData }) {
           padding: '16px 8px 6px',
           color: 'var(--text-secondary)', fontSize: 11, fontFamily: 'var(--font-sans)', letterSpacing: '0.02em',
         }}>
-          {data.query}
+          {data.query}{urls.length > 1 ? ` · ${currentIndex + 1}/${urls.length}` : ''}
         </div>
       </div>
     </div>

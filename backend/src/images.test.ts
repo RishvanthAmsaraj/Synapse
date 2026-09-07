@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanQuery, buildQueryLadder, fetchWikipediaImage } from './images.js';
+import { cleanQuery, buildQueryLadder, fetchWikipediaImages } from './images.js';
 
 // ---------------------------------------------------------------------------
 // cleanQuery — pure normalization (deterministic, no network)
@@ -62,18 +62,18 @@ test('ladder always offers progressively simpler rungs', () => {
 // fetchWikipediaImage — integration (network; validates the actual fix)
 // ---------------------------------------------------------------------------
 
-test('fetch resolves a normal query', async () => {
-  const url = await fetchWikipediaImage('blue whale');
-  assert.ok(url, 'expected a URL for "blue whale"');
-  assert.match(url!, /^https?:\/\//);
+test('fetch returns candidate URLs for a normal query', async () => {
+  const urls = await fetchWikipediaImages('blue whale');
+  assert.ok(urls.length > 0, 'expected at least one URL for "blue whale"');
+  for (const u of urls) assert.match(u, /^https?:\/\//);
 });
 
 test('fetch resolves a "different X" query (THE regression)', async () => {
-  const url = await fetchWikipediaImage('different blue whale');
-  assert.ok(url, 'expected "different blue whale" to resolve via the ladder');
+  const urls = await fetchWikipediaImages('different blue whale');
+  assert.ok(urls.length > 0, 'expected "different blue whale" to resolve via the ladder');
 });
 
 test('fetch resolves an "another X" query', async () => {
-  const url = await fetchWikipediaImage('another golden gate bridge');
-  assert.ok(url, 'expected "another golden gate bridge" to resolve');
+  const urls = await fetchWikipediaImages('another golden gate bridge');
+  assert.ok(urls.length > 0, 'expected "another golden gate bridge" to resolve');
 });
