@@ -30,11 +30,30 @@
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
-  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+  transition: border-color 0.3s, transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.3s, opacity 0.3s, filter 0.3s;
 }
-.canvas-cell:hover {
+
+/* The contextually relevant widget — full presence, gently elevated */
+.canvas-cell.focused {
   border-color: var(--accent-border);
-  transform: translateY(-2px);
+  transform: translateY(-2px) scale(1.015);
+  box-shadow:
+    0 14px 44px rgba(0, 0, 0, 0.45),
+    0 0 32px var(--orb-glow-soft);
+}
+
+/* Everything else takes a back seat until the conversation turns to it */
+.canvas-cell.dimmed {
+  opacity: 0.42;
+  transform: scale(0.955);
+  filter: saturate(0.65);
+}
+.canvas-cell.dimmed:hover {
+  opacity: 0.9;
+  border-color: var(--accent-border);
+  transform: translateY(-2px) scale(0.97);
+  filter: saturate(1);
   box-shadow:
     0 14px 44px rgba(0, 0, 0, 0.45),
     0 0 28px var(--orb-glow-soft);

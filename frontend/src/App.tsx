@@ -31,7 +31,7 @@ export default function App() {
 }
 
 function AppInner() {
-  const { addWidget, removeWidget, updateWidget, clearWidgets, getInventoryString, widgets } = useCanvas();
+  const { addWidget, removeWidget, updateWidget, focusWidget, clearWidgets, getInventoryString, widgets } = useCanvas();
   // Live audio level (mic + TTS playback) — drives the orb's pulse.
   const audioPeakRef = useRef<number>(0);
 
@@ -166,11 +166,13 @@ function AppInner() {
             const id = addWidget('code_viewer', data, 2, 2);
             codeViewerIdRef.current = id;
           }
+          if (codeViewerIdRef.current) focusWidget(codeViewerIdRef.current);
           break;
         }
 
         case 'code_viewer_next_highlight': {
           if (!codeViewerIdRef.current) break;
+          focusWidget(codeViewerIdRef.current);
           const { start_line, end_line } = call.args as { start_line: number; end_line: number };
           if (!start_line || !end_line || start_line <= 0 || end_line <= 0) break;
           highlightsClearedRef.current = false;
@@ -204,6 +206,7 @@ function AppInner() {
             const id = addWidget('image', data, 1, 1);
             imageWidgetIdRef.current = id;
           }
+          if (imageWidgetIdRef.current) focusWidget(imageWidgetIdRef.current);
           break;
         }
 
@@ -211,7 +214,8 @@ function AppInner() {
         case 'text_show': {
           const { content } = call.args as { content: string };
           const data: TextWidgetData = { content };
-          addWidget('text', data, 2, 2);
+          const id = addWidget('text', data, 2, 2);
+          focusWidget(id);
           break;
         }
 
@@ -221,11 +225,13 @@ function AppInner() {
           callStackDataRef.current = initial;
           const id = addWidget('call_stack', initial, 1, 2);
           callStackIdRef.current = id;
+          focusWidget(id);
           break;
         }
 
         case 'call_stack_push': {
           if (!callStackIdRef.current) break;
+          focusWidget(callStackIdRef.current);
           const { function_name, args: frameArgs } = call.args as {
             function_name: string;
             args: string;
@@ -299,6 +305,7 @@ function AppInner() {
           } else {
             const id = addWidget('terminal', data, 2, 2);
             execTerminalIdRef.current = id;
+            focusWidget(id);
           }
 
           // Simulate async execution — in production this calls the backend
@@ -331,7 +338,7 @@ function AppInner() {
         }
       }
     },
-    [addWidget, removeWidget, updateWidget, addLog, addLog]
+    [addWidget, removeWidget, updateWidget, focusWidget, addLog]
   );
 
   const { connect, disconnect, sendAudio, sendContext, status } = useLiveSession({
@@ -499,7 +506,11 @@ function Orb({ status, listening, mini = false, peakRef }: {
       smoothedRef.current += (target - smoothedRef.current) * 0.28;
       const s = smoothedRef.current;
       if (!reduced) {
-        if (coreRef.current) coreRef.current.style.transform = `scale(${(1 + s * 0.26).toFixed(4)})`;
+        // Asymmetric liquid squash-stretch driven by live audio: the orb
+        // stretches more on the axis of the sound, then eases back.
+        if (coreRef.current) {
+          coreRef.current.style.transform = `scale(${(1 + s * 0.26).toFixed(4)}, ${(1 + s * 0.15).toFixed(4)}) rotate(${(s * 2.5).toFixed(2)}deg)`;
+        }
         if (auraRef.current) auraRef.current.style.opacity = String(0.28 + s * 0.72);
       }
       raf = requestAnimationFrame(tick);

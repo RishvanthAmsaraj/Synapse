@@ -17,10 +17,12 @@ type Action =
   | { type: 'ADD'; widget: Widget }
   | { type: 'REMOVE'; id: string }
   | { type: 'UPDATE'; id: string; data: unknown }
+  | { type: 'FOCUS'; id: string }
   | { type: 'CLEAR' };
 
 interface CanvasState {
   widgets: Widget[];
+  focusedId: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -30,17 +32,26 @@ interface CanvasState {
 function reducer(state: CanvasState, action: Action): CanvasState {
   switch (action.type) {
     case 'ADD':
-      return { widgets: [...state.widgets, action.widget] };
+      return {
+        widgets: [...state.widgets, action.widget],
+        focusedId: action.widget.id,
+      };
     case 'REMOVE':
-      return { widgets: state.widgets.filter((w) => w.id !== action.id) };
+      return {
+        widgets: state.widgets.filter((w) => w.id !== action.id),
+        focusedId: state.focusedId === action.id ? null : state.focusedId,
+      };
     case 'UPDATE':
       return {
         widgets: state.widgets.map((w) =>
           w.id === action.id ? { ...w, data: action.data } : w
         ),
+        focusedId: state.focusedId,
       };
+    case 'FOCUS':
+      return { widgets: state.widgets, focusedId: action.id };
     case 'CLEAR':
-      return { widgets: [] };
+      return { widgets: [], focusedId: null };
   }
 }
 
@@ -50,9 +61,11 @@ function reducer(state: CanvasState, action: Action): CanvasState {
 
 export interface CanvasContextValue {
   widgets: Widget[];
+  focusedId: string | null;
   addWidget: (widgetType: string, data: unknown, cols?: number, rows?: number) => string;
   removeWidget: (id: string) => void;
   updateWidget: (id: string, data: unknown) => void;
+  focusWidget: (id: string) => void;
   clearWidgets: () => void;
   getInventoryString: () => string;
 }
@@ -64,7 +77,7 @@ const CanvasContext = createContext<CanvasContextValue | null>(null);
 // ---------------------------------------------------------------------------
 
 export function CanvasProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, { widgets: [] });
+  const [state, dispatch] = useReducer(reducer, { widgets: [], focusedId: null });
   // Use a ref for the ID counter — synchronous, no stale closure issues
   const counterRef = useRef(1);
 
@@ -89,17 +102,21 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'UPDATE', id, data });
   }, []);
 
+  const focusWidget = useCallback((id: string) => {
+    dispatch({ type: 'FOCUS', id });
+  }, []);
+
   const getInventoryString = useCallback(() => {
     if (state.widgets.length === 0) return 'The canvas is currently empty.';
     const items = state.widgets
-      .map((w) => `[${w.id}: ${w.type}]`)
+      .map((w: Widget) => `[${w.id}: ${w.type}]`)
       .join(' ');
     return `Current canvas state: ${items}`;
   }, [state.widgets]);
 
   return (
     <CanvasContext.Provider
-      value={{ widgets: state.widgets, addWidget, removeWidget, updateWidget, clearWidgets, getInventoryString }}
+      value={{ widgets: state.widgets, focusedId: state.focusedId, addWidget, removeWidget, updateWidget, focusWidget, clearWidgets, getInventoryString }}
     >
       {children}
     </CanvasContext.Provider>

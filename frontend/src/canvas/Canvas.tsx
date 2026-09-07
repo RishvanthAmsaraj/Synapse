@@ -21,13 +21,14 @@ import './Canvas.css';
  */
 
 export function Canvas() {
-  const { widgets } = useCanvas();
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const { widgets, focusedId } = useCanvas();
+  const focusedRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to the newest widget (horizontal filmstrip)
+  // Auto-scroll to keep the focused widget front and center; when nothing is
+  // focused yet, fall back to the newest widget (horizontal filmstrip).
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', inline: 'end' });
-  }, [widgets.length]);
+    focusedRef.current?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }, [focusedId, widgets.length]);
 
   if (widgets.length === 0) {
     return (
@@ -40,19 +41,22 @@ export function Canvas() {
   return (
     <div className="canvas-scroll">
       <div className="canvas-grid">
-        {widgets.map((widget) => (
-          <div
-            key={widget.id}
-            className="canvas-cell"
-            style={{
-              width: widget.cols >= 2 ? 560 : 420,
-            }}
-          >
-            {renderWidget(widget.type, widget.data)}
-          </div>
-        ))}
+        {widgets.map((widget) => {
+          const isFocused = widget.id === focusedId;
+          return (
+            <div
+              key={widget.id}
+              ref={isFocused ? focusedRef : undefined}
+              className={`canvas-cell${isFocused ? ' focused' : widgets.length > 1 ? ' dimmed' : ''}`}
+              style={{
+                width: widget.cols >= 2 ? 560 : 420,
+              }}
+            >
+              {renderWidget(widget.type, widget.data)}
+            </div>
+          );
+        })}
       </div>
-      <div ref={bottomRef} />
     </div>
   );
 }
