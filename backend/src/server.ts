@@ -2,21 +2,20 @@ import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import WebSocket, { WebSocketServer } from 'ws';
-import { GoogleGenAI, Modality, FunctionResponseScheduling } from '@google/genai';
+import { FunctionResponseScheduling } from '@google/genai';
 import { TOOL_DECLARATIONS } from './tools.js';
 import { validate, isError } from './validator.js';
 import { fetchWikipediaImages } from './images.js';
+import { createProvider } from './provider.js';
 
-// gemini-2.5-flash-native-audio-preview-12-2025 supports NON_BLOCKING tool calls
-const MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
 const PORT = Number(process.env.PORT) || 3001;
-
-// ---------------------------------------------------------------------------
-// Gemini client — standard Gemini API (supports NON_BLOCKING tool calls)
-// ---------------------------------------------------------------------------
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY!,
-});
+// Provider / model / voice are config-driven (see .env.example). Gemini Live
+// flash is the default: free-tier, low-latency, already proven. OpenAI
+// Realtime slots in as a future provider without touching this file.
+const PROVIDER = process.env.VOICE_PROVIDER || 'gemini';
+const MODEL = process.env.VOICE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
+const VOICE_NAME = process.env.VOICE_NAME || 'Aoede';
+const API_KEY = process.env.GEMINI_API_KEY || '';
 
 const SYSTEM_PROMPT = `You are Synapse — a warm, quick-witted, endlessly curious voice assistant with a live visual canvas that updates silently as you speak. You feel like talking to a brilliant friend: genuine warmth, plain language, a little dry humor when it lands. Never saccharine, never robotic. You can discuss ANY topic: computer science, algorithms, math, science, history, writing, general knowledge, or anything the user is curious about.
 
@@ -38,7 +37,7 @@ Tool calls are completely invisible to the user. Never announce one before it fi
 
 The canvas tools:
 - text_show — structured markdown (## headings, **bold**, - lists). text_show REPLACES the previous text panel, so the canvas never accumulates stale text tiles — put the latest key points in one panel.
-- image_show — when a picture helps. Shortest accurate query, e.g. "binary search tree", "water cycle", "Colosseum". image_show replaces the previous image. If it reports an error, the picture did NOT appear — try a different, simpler query rather than claiming a picture was shown.
+- image_show — when a picture helps. Pass ONLY the subject as a short noun phrase, never conversational filler: "binary search tree", "water cycle", "Colosseum" — not "show me a picture of the water cycle". image_show replaces the previous image. If it reports an error, the picture did NOT appear — try a different, simpler query rather than claiming a picture was shown.
 - code_viewer_show — whenever you show real code. Use real newlines. Add code_viewer_next_highlight(start_line, end_line) — one call per section, in order — so the code lights up as you teach.
 - clear_canvas — wipes every widget, returning to the bare orb. Call it when the user switches topics or asks to clear the screen (when they explicitly ask, you MUST call it — never just say you did). If the user wants to replace ONE widget (not everything), just re-issue that widget's tool — it replaces in place; no clear needed.
 
@@ -50,10 +49,6 @@ When someone wants to LEARN a concept: give a 3-4 sentence overview out loud whi
 After any interruption: if canvas state contains "highlights cleared", re-call code_viewer_next_highlight at the start of your next response for every section you are about to discuss — highlights do not survive interruptions.`;
 
 // ---------------------------------------------------------------------------
-// Image search — see images.ts (extracted for modularity + testability)
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // HTTP + WebSocket server
 // ---------------------------------------------------------------------------
 const app = express();
@@ -63,17 +58,10 @@ const wss = new WebSocketServer({ server, path: '/api/live' });
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 // ---------------------------------------------------------------------------
-// One Gemini session per browser WebSocket connection
+// One voice session per browser WebSocket connection
 // ---------------------------------------------------------------------------
 wss.on('connection', async (browserWs) => {
   console.log('[proxy] Browser connected');
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let geminiSession: any = null;
-  // Transparent recovery: when Gemini drops the session (rate limit,
-  // timeout, transient error), the proxy silently creates a fresh one
-  // on the SAME browser WebSocket — the user sees no disconnect.
-  let recoveryAttempts = 0;
 
   const safeSend = (payload: object) => {
     if (browserWs.readyState === WebSocket.OPEN) {
@@ -85,185 +73,101 @@ wss.on('connection', async (browserWs) => {
     }
   };
 
-  const startGeminiSession = async (isRecovery: boolean) => {
-    geminiSession = await ai.live.connect({
+  const provider = createProvider(
+    {
+      provider: PROVIDER,
       model: MODEL,
-      config: {
-        responseModalities: [Modality.AUDIO],
-        systemInstruction: {
-          parts: [{ text: SYSTEM_PROMPT }],
-        },
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Aoede' },
-          },
-        },
-        tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
-      },
-      callbacks: {
-        onopen: () => {
-          recoveryAttempts = 0;
-          console.log(`[proxy] Gemini session open${isRecovery ? ' (recovered)' : ''}`);
-          safeSend({ type: isRecovery ? 'session_recovered' : 'ready' });
-        },
+      voiceName: VOICE_NAME,
+      systemInstruction: SYSTEM_PROMPT,
+      apiKey: API_KEY,
+      tools: TOOL_DECLARATIONS,
+    },
+    {
+      onReady: () => safeSend({ type: 'ready' }),
+      onRecovered: () => safeSend({ type: 'session_recovered' }),
+      onAudio: (data, mimeType) => safeSend({ type: 'audio', data, mimeType }),
+      onTurnComplete: () => safeSend({ type: 'turn_complete' }),
+      onInterrupted: () => safeSend({ type: 'interrupted' }),
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        onmessage: async (message: any) => {
+      // Validate + execute tool calls, then answer the model in one batch.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      onToolCalls: async (functionCalls: any[]) => {
+        const responses: Array<{
+          id: string;
+          name: string;
+          response: Record<string, unknown>;
+          scheduling: FunctionResponseScheduling;
+        }> = [];
+
+        for (const fc of functionCalls) {
           try {
-          // --- Audio output ---
-          const parts = message.serverContent?.modelTurn?.parts ?? [];
-          for (const part of parts) {
-            if (part.inlineData?.mimeType?.startsWith('audio/')) {
-              safeSend({
-                type: 'audio',
-                data: part.inlineData.data,
-                mimeType: part.inlineData.mimeType,
+            const args = (fc.args ?? {}) as Record<string, unknown>;
+            const result = validate(fc.name as string, args);
+
+            if (isError(result)) {
+              console.warn(`[validator] Rejected call to "${fc.name}": ${result.reason}`);
+              responses.push({
+                id: fc.id,
+                name: fc.name,
+                response: { error: result.reason },
+                scheduling: FunctionResponseScheduling.SILENT,
+              });
+              continue;
+            }
+
+            console.log(`[validator] Accepted: ${result.name}`, result.args);
+
+            if (result.name === 'image_show') {
+              const query = result.args.query as string;
+              const urls = await fetchWikipediaImages(query);
+              console.log(`[wikipedia] query="${query}" → ${urls.length} candidate(s)`);
+              safeSend({ type: 'tool_call', name: 'image_show', args: { query, urls } });
+              responses.push({
+                id: fc.id,
+                name: fc.name,
+                response: urls.length
+                  ? { result: 'ok', count: urls.length }
+                  : { result: 'error', message: `No image found for "${query}". Try a shorter or more general query.` },
+                scheduling: FunctionResponseScheduling.SILENT,
+              });
+            } else {
+              safeSend({ type: 'tool_call', name: result.name, args: result.args });
+              responses.push({
+                id: fc.id,
+                name: fc.name,
+                response: { result: 'ok' },
+                scheduling: FunctionResponseScheduling.SILENT,
               });
             }
-          }
-
-          // --- Turn signals ---
-          if (message.serverContent?.turnComplete) {
-            safeSend({ type: 'turn_complete' });
-          }
-          if (message.serverContent?.interrupted) {
-            safeSend({ type: 'interrupted' });
-          }
-
-          // --- Tool calls ---
-          // All responses for a single toolCall message must be sent in ONE sendToolResponse call.
-          const functionCalls = message.toolCall?.functionCalls ?? [];
-          if (functionCalls.length > 0) {
-            const responses: Array<{
-              id: string;
-              name: string;
-              response: Record<string, unknown>;
-              scheduling: FunctionResponseScheduling;
-            }> = [];
-
-            for (const fc of functionCalls) {
-              try {
-                const args = (fc.args ?? {}) as Record<string, unknown>;
-                const result = validate(fc.name as string, args);
-
-                if (isError(result)) {
-                  console.warn(`[validator] Rejected call to "${fc.name}": ${result.reason}`);
-                  responses.push({
-                    id: fc.id,
-                    name: fc.name,
-                    response: { error: result.reason },
-                    scheduling: FunctionResponseScheduling.SILENT,
-                  });
-                  continue;
-                }
-
-                console.log(`[validator] Accepted: ${result.name}`, result.args);
-
-                // image_show needs an async Wikipedia fetch before we can forward to browser
-                if (result.name === 'image_show') {
-                  const query = result.args.query as string;
-                  const urls = await fetchWikipediaImages(query);
-                  console.log(`[wikipedia] query="${query}" → ${urls.length} candidate(s)`);
-                  safeSend({ type: 'tool_call', name: 'image_show', args: { query, urls } });
-                  responses.push({
-                    id: fc.id,
-                    name: fc.name,
-                    // Tell the model the truth: if no image was found, it must
-                    // know its tool call did not produce a visual.
-                    response: urls.length
-                      ? { result: 'ok', count: urls.length }
-                      : { result: 'error', message: `No image found for "${query}". Try a shorter or more general query.` },
-                    scheduling: FunctionResponseScheduling.SILENT,
-                  });
-                } else {
-                  safeSend({ type: 'tool_call', name: result.name, args: result.args });
-                  responses.push({
-                    id: fc.id,
-                    name: fc.name,
-                    response: { result: 'ok' },
-                    scheduling: FunctionResponseScheduling.SILENT,
-                  });
-                }
-              } catch (e) {
-                console.error(`[proxy] Unexpected error handling tool call "${fc.name}":`, e);
-              }
-            }
-
-            if (responses.length > 0) {
-              // NON_BLOCKING + SILENT — model keeps talking uninterrupted
-              try {
-                Promise.resolve(
-                  geminiSession.sendToolResponse({ functionResponses: responses })
-                ).catch((e: unknown) => console.error(`[proxy] sendToolResponse error:`, e));
-              } catch (e) {
-                console.error(`[proxy] sendToolResponse threw synchronously:`, e);
-              }
-            }
-          }
           } catch (e) {
-            console.error('[proxy] Uncaught error in onmessage:', e);
+            console.error(`[proxy] Unexpected error handling tool call "${fc.name}":`, e);
           }
-        },
+        }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        onerror: (e: any) => {
-          console.error('[proxy] Gemini error:', e);
-        },
-
-        onclose: () => {
-          console.log('[proxy] Gemini session closed');
-          if (browserWs.readyState !== WebSocket.OPEN) return;
-          // Transparent recovery: recreate the Gemini session on this same
-          // browser connection instead of dropping it. Only after repeated
-          // failures do we signal the browser (whose own auto-reconnect
-          // then takes over as a last resort).
-          if (recoveryAttempts >= 3) {
-            console.log('[proxy] recovery attempts exhausted — closing browser WS');
-            safeSend({ type: 'session_closed' });
-            browserWs.close();
-            return;
-          }
-          recoveryAttempts += 1;
-          const delay = Math.min(1500 * 2 ** (recoveryAttempts - 1), 8000);
-          console.log(`[proxy] recovering Gemini session in ${delay}ms (attempt ${recoveryAttempts}/3)`);
-          setTimeout(() => {
-            if (browserWs.readyState !== WebSocket.OPEN) return;
-            startGeminiSession(true).catch((err) => {
-              console.error('[proxy] recovery connect failed:', err);
-              safeSend({ type: 'session_closed' });
-              browserWs.close();
-            });
-          }, delay);
-        },
+        if (responses.length > 0) provider.sendToolResponse(responses);
       },
-    });
-  };
+
+      onClosed: () => {
+        safeSend({ type: 'session_closed' });
+        browserWs.close();
+      },
+    },
+  );
 
   try {
-    await startGeminiSession(false);
+    await provider.connect();
   } catch (err) {
-    console.error('[proxy] Failed to connect to Gemini:', err);
+    console.error('[proxy] Failed to connect:', err);
     browserWs.close();
     return;
   }
 
-  // --- Browser → Gemini ---
+  // --- Browser → provider ---
   browserWs.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
-
-      if (msg.type === 'audio' && geminiSession) {
-        geminiSession.sendRealtimeInput({
-          audio: {
-            data: msg.data,
-            mimeType: msg.mimeType ?? 'audio/pcm;rate=16000',
-          },
-        });
-      }
-
-      if (msg.type === 'context' && geminiSession) {
-        geminiSession.sendRealtimeInput({ text: msg.text as string });
-      }
+      if (msg.type === 'audio') provider.sendAudio(msg.data, msg.mimeType);
+      if (msg.type === 'context') provider.sendText(msg.text as string);
     } catch (err) {
       console.error('[proxy] Bad message from browser:', err);
     }
@@ -271,7 +175,7 @@ wss.on('connection', async (browserWs) => {
 
   browserWs.on('close', () => {
     console.log('[proxy] Browser disconnected');
-    try { geminiSession?.close?.(); } catch (_) { /* ignore */ }
+    provider.close();
   });
 });
 
