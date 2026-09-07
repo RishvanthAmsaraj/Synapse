@@ -8,6 +8,29 @@ import { validate, isError } from './validator.js';
 import { fetchWikipediaImages } from './images.js';
 import { createProvider } from './provider.js';
 import { getPersona, buildSystemPrompt } from './personas.js';
+import { execFile } from 'node:child_process';
+
+/** Run a Python snippet locally with a hard timeout. Returns real output. */
+function runPython(code: string): Promise<{ status: 'done' | 'error'; output?: string; error?: string }> {
+  return new Promise((resolve) => {
+    execFile(
+      'python3',
+      ['-c', code],
+      { timeout: 8000, maxBuffer: 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) {
+          if ((err as NodeJS.ErrnoException & { killed?: boolean }).killed) {
+            resolve({ status: 'error', error: 'Execution timed out (8s limit).' });
+          } else {
+            resolve({ status: 'error', error: (stderr || err.message || 'Execution failed').trim() });
+          }
+        } else {
+          resolve({ status: 'done', output: stdout.trim() });
+        }
+      },
+    );
+  });
+}
 
 const PORT = Number(process.env.PORT) || 3001;
 // Provider / model are config-driven; the persona drives voice + personality.
@@ -103,6 +126,23 @@ wss.on('connection', async (browserWs) => {
                 response: urls.length
                   ? { result: 'ok', count: urls.length }
                   : { result: 'error', message: `No image found for "${query}". Try a shorter or more general query.` },
+                scheduling: FunctionResponseScheduling.SILENT,
+              });
+            } else if (result.name === 'exec_python') {
+              const { code, description } = result.args as { code: string; description: string };
+              const execResult = await runPython(code);
+              safeSend({
+                type: 'tool_call',
+                name: 'exec_python',
+                args: { code, description, status: execResult.status, output: execResult.output, error: execResult.error },
+              });
+              responses.push({
+                id: fc.id,
+                name: fc.name,
+                response:
+                  execResult.status === 'done'
+                    ? { result: 'ok', output: execResult.output }
+                    : { result: 'error', message: execResult.error },
                 scheduling: FunctionResponseScheduling.SILENT,
               });
             } else {

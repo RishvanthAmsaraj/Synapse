@@ -294,17 +294,25 @@ function AppInner() {
 
         // ── Exec Stream ──────────────────────────────────────────────
         case 'exec_python': {
-          const { code, description } = call.args as { code: string; description: string };
+          const { code, description, status, output, error } = call.args as {
+            code: string;
+            description: string;
+            status: 'done' | 'error';
+            output?: string;
+            error?: string;
+          };
           const normalizedCode = code.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
 
-          // Create or update terminal widget
+          // Real execution happened on the backend — show its actual result.
           execBlockCounterRef.current += 1;
           const blockId = `exec_${execBlockCounterRef.current}`;
           const newBlock: ExecBlock = {
             id: blockId,
             code: normalizedCode,
             description,
-            status: 'running',
+            status,
+            output,
+            error,
           };
 
           const currentData = execTerminalDataRef.current;
@@ -319,23 +327,6 @@ function AppInner() {
             execTerminalIdRef.current = id;
             focusWidget(id);
           }
-
-          // Simulate async execution — in production this calls the backend
-          // For now, show the code and mark as done after a brief delay
-          setTimeout(() => {
-            const current = execTerminalDataRef.current;
-            const updated = {
-              blocks: current.blocks.map(b =>
-                b.id === blockId
-                  ? { ...b, status: 'done' as const, output: 'Execution simulation — sandboxed Python executor pending' }
-                  : b
-              ),
-            };
-            execTerminalDataRef.current = updated;
-            if (execTerminalIdRef.current) {
-              updateWidget(execTerminalIdRef.current, updated);
-            }
-          }, 1500);
           break;
         }
 

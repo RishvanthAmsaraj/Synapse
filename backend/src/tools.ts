@@ -120,10 +120,10 @@ export const TOOL_SPECS: ToolSpec[] = [
     name: 'exec_python',
     widgetType: 'terminal',
     description:
-      '[EXEC STREAM — Sandboxed] Run a Python snippet and display the output. ' +
-      'The execution runs in a sandboxed environment separate from speech ' +
-      'and canvas updates. The result appears in a terminal-like widget. ' +
+      '[EXEC STREAM] Run a Python snippet locally and display its real output. ' +
+      'The result appears in a terminal-like widget. ' +
       'Use for quick calculations, data analysis, or algorithm demonstrations. ' +
+      'Execution has an 8-second limit — keep snippets short. ' +
       'Works concurrently with speech — you can narrate while code executes.',
     params: [
       { name: 'code', type: 'string', description: 'Python code to execute. Keep it short and focused — this is for real-time demos.' },
