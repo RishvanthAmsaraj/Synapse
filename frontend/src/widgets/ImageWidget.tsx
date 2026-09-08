@@ -62,7 +62,7 @@ export function ImageWidget({ data }: { data: ImageWidgetData }) {
             // Advance to the next candidate on load failure.
             if (currentIndex < urls.length - 1) setIndex(currentIndex + 1);
           }}
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
         />
         <div style={{
           position: 'absolute', bottom: 0, left: 0, right: 0,

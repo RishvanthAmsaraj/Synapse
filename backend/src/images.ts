@@ -108,15 +108,15 @@ async function searchImages(candidate: string): Promise<string[]> {
     }
   };
 
-  // Fast path: REST summary thumbnail.
+  // Fast path: REST summary — prefer the full-resolution original image.
   const summary = await fetchJsonWithTimeout(
     `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(candidate)}`
   );
-  push(summary?.thumbnail?.source);
+  push(summary?.originalimage?.source ?? summary?.thumbnail?.source);
 
   // Wikimedia Commons — collect ALL matching images, not just the first.
   const commons = await fetchJsonWithTimeout(
-    `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(candidate)}&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json`
+    `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(candidate)}&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url&iiurlwidth=1600&format=json`
   );
   if (commons?.query?.pages) {
     const pages = Object.values(commons.query.pages) as any[];
