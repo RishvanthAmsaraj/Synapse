@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CanvasProvider, useCanvas } from './canvas/CanvasProvider';
 import { Canvas } from './canvas/Canvas';
 import { SPPE, type SPPEStreamEvent } from './sppe/SPPE';
@@ -12,6 +12,7 @@ import type { CallStackData } from './widgets/CallStack';
 import type { ImageWidgetData } from './widgets/ImageWidget';
 import type { TextWidgetData } from './widgets/TextWidget';
 import type { TerminalWidgetData, ExecBlock } from './widgets/TerminalWidget';
+import { HoloFace } from './holo/HoloFace';
 import './App.css';
 
 // Staggered highlight timing: first fires after a short pause,
@@ -32,12 +33,14 @@ export default function App() {
 
 function AppInner() {
   const { addWidget, removeWidget, updateWidget, focusWidget, clearWidgets, getInventoryString, widgets } = useCanvas();
-  // Live audio level (mic + TTS playback) — drives the orb's pulse.
-  const audioPeakRef = useRef<number>(0);
+  // Live audio levels — mic drives "listening" liveliness; TTS playback
+  // drives the face's mouth (lip sync).
+  const micPeakRef = useRef<number>(0);
+  const ttsPeakRef = useRef<number>(0);
 
   const { playChunk, flush, stop } = useAudioPlayback(
     useCallback((level: number) => {
-      audioPeakRef.current = Math.max(audioPeakRef.current, level);
+      ttsPeakRef.current = Math.max(ttsPeakRef.current, level);
     }, [])
   );
   const { pushEvent, pushConflict, setFrontier, events, frontiers, conflicts } = useSPPEDebug();
@@ -401,7 +404,7 @@ function AppInner() {
   const { start: startMic, stop: stopMic, isRecording } = useAudioIO(
     useCallback((chunk: string) => sendAudio(chunk), [sendAudio]),
     useCallback((level: number) => {
-      audioPeakRef.current = Math.max(audioPeakRef.current, level);
+      micPeakRef.current = Math.max(micPeakRef.current, level);
     }, [])
   );
 
@@ -487,7 +490,7 @@ function AppInner() {
         {!hasWidgets ? (
           <>
             <section className="hero">
-              <Orb status={status} listening={isRecording} peakRef={audioPeakRef} />
+              <HoloFace status={status} listening={isRecording} micPeakRef={micPeakRef} ttsPeakRef={ttsPeakRef} />
               {statusEl}
             </section>
             <div className="controls-bar">{sessionControls}</div>
@@ -497,7 +500,7 @@ function AppInner() {
             <Canvas />
             <div className="session-bar">
               <div className="session-voice">
-                <Orb status={status} listening={isRecording} mini peakRef={audioPeakRef} />
+                <HoloFace status={status} listening={isRecording} mini micPeakRef={micPeakRef} ttsPeakRef={ttsPeakRef} />
                 {statusEl}
               </div>
               <div className="session-controls">
@@ -510,57 +513,6 @@ function AppInner() {
       </main>
 
       <DebugPanel logs={logs} events={events} frontiers={frontiers} conflicts={conflicts} />
-    </div>
-  );
-}
-
-/** The luminous voice orb — the speech stream made visible. Reacts to live
- *  audio level (mic + TTS playback) via the shared peak ref. */
-function Orb({ status, listening, mini = false, peakRef }: {
-  status: string; listening: boolean; mini?: boolean; peakRef: MutableRefObject<number>;
-}) {
-  const coreRef = useRef<HTMLDivElement>(null);
-  const auraRef = useRef<HTMLDivElement>(null);
-  const smoothedRef = useRef(0);
-
-  // Peak-hold with decay: read the highest level seen since the last frame,
-  // then ease toward it. Gives smooth, organic motion from chunked updates.
-  useEffect(() => {
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    let raf = 0;
-    const tick = () => {
-      const target = peakRef.current;
-      peakRef.current = 0;
-      smoothedRef.current += (target - smoothedRef.current) * 0.28;
-      const s = smoothedRef.current;
-      if (!reduced) {
-        // Asymmetric liquid squash-stretch driven by live audio: the orb
-        // stretches more on the axis of the sound, then eases back.
-        if (coreRef.current) {
-          coreRef.current.style.transform = `scale(${(1 + s * 0.26).toFixed(4)}, ${(1 + s * 0.15).toFixed(4)}) rotate(${(s * 2.5).toFixed(2)}deg)`;
-        }
-        if (auraRef.current) auraRef.current.style.opacity = String(0.28 + s * 0.72);
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [peakRef]);
-
-  let state: string;
-  if (status === 'connected' && listening) state = 'listening';
-  else if (status === 'connected') state = 'idle';
-  else if (status === 'connecting') state = 'connecting';
-  else state = 'disconnected';
-
-  return (
-    <div className={`orb-wrap orb--${state}${mini ? ' mini' : ''}`}>
-      <div className="orb-aura" ref={auraRef} />
-      <div className="orb-core" ref={coreRef} />
-      <div className="orb-sheen" />
-      <div className="orb-ring r1" />
-      <div className="orb-ring r2" />
-      <div className="orb-ring r3" />
     </div>
   );
 }
