@@ -52,9 +52,12 @@ function sampleSurface(
 
   // area-weighted triangle pick
   const area = (t: [number, number, number]) => {
-    const ax = pos[t[0]], bx = pos[t[1]], cx = pos[t[2]];
-    const ux = bx - ax, uy = bx + 1 - (ax + 1), uz = bx + 2 - (ax + 2);
-    const wx = cx - ax, wy = cx + 1 - (ax + 1), wz = cx + 2 - (ax + 2);
+    const ai = t[0], bi = t[1], ci = t[2];
+    const ax = pos[ai], ay = pos[ai + 1], az = pos[ai + 2];
+    const bx = pos[bi], by = pos[bi + 1], bz = pos[bi + 2];
+    const cx = pos[ci], cy = pos[ci + 1], cz = pos[ci + 2];
+    const ux = bx - ax, uy = by - ay, uz = bz - az;
+    const wx = cx - ax, wy = cy - ay, wz = cz - az;
     const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
     return 0.5 * Math.hypot(nx, ny, nz);
   };
@@ -65,7 +68,11 @@ function sampleSurface(
   for (let k = 0; k < count; k++) {
     let r = Math.random() * total;
     let ti = 0;
-    for (let i = 0; i < areas.length; i++) { r -= areas[i]; if (r <= 0) { ti = i; break; } }
+    if (total <= 0) {
+      ti = Math.floor(Math.random() * tris.length);
+    } else {
+      for (let i = 0; i < areas.length; i++) { r -= areas[i]; if (r <= 0) { ti = i; break; } }
+    }
     const t = tris[ti];
     const x0 = pos[t[0]], y0 = pos[t[0] + 1], z0 = pos[t[0] + 2];
     const x1 = pos[t[1]], y1 = pos[t[1] + 1], z1 = pos[t[1] + 2];
