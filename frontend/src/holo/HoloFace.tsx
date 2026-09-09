@@ -3,40 +3,83 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /**
- * HoloFace — a Gideon/Jarvis-style holographic face: a real 3D head rendered
- * as a dot-matrix point cloud, with morph-target lip sync and expression.
+ * HoloFace v3 — a Gideon/Jarvis-style holographic face.
  *
- * Loads a Ready Player Me head (head.glb) which carries ARKit morph targets
- * (mouthOpen, mouthSmile). Three.js Points doesn't apply morph targets, so we
- * blend them manually each frame (glTF morphs are vertex deltas) into the
- * point positions, then render. Blinks are procedural (the separate eyeball
- * meshes squash on a blink cycle). The head floats and turns slowly in 3D.
+ * Loads a Ready Player Me head (head.glb), bakes the world transforms, then
+ * RE-SAMPLES the mesh surface into a dense, even dot-matrix (thousands of
+ * points instead of the raw sparse vertices). Regions are tagged by position
+ * so the mouth is animated procedurally:
+ *   - jaw points (lower face) drop + push forward with TTS audio (lip sync)
+ *   - eye points fade on a blink cycle
+ *   - the whole head floats and turns in 3D
  *
- * Lip sync is amplitude-driven from the TTS audio (no viseme data from Gemini
- * Live), so the jaw opens with speech volume rather than exact phonemes.
+ * Lip sync is amplitude-driven (Gemini Live exposes no visemes), so the jaw
+ * follows speech volume rather than exact phonemes.
  */
 
 interface HoloFaceProps {
-  status: string;          // 'disconnected' | 'connecting' | 'connected'
-  listening: boolean;      // mic is hot
+  status: string;
+  listening: boolean;
   mini?: boolean;
   micPeakRef: MutableRefObject<number>;
   ttsPeakRef: MutableRefObject<number>;
 }
 
-// Meshes that make up the face (skip beard, body, outfits).
 const HEAD_MESH_RE = /^(Wolf3D_Head|EyeLeft|EyeRight|Wolf3D_Teeth)$/;
+const HOLO_COLOR = 0x59ddff;
 
-interface FacePart {
-  name: string;
-  points: THREE.Points;
-  base: Float32Array;              // pristine base vertex positions
-  deltas: Float32Array[];          // morph-target deltas, indexed by morphIndex
-  morphIndex: Record<string, number>; // morph name -> delta array index
-  isEye: boolean;
+type Region = 'jaw' | 'rest';
+
+function regionOf(x: number, y: number): Region {
+  return y < 1.665 ? 'jaw' : 'rest';
 }
 
-const HOLO_COLOR = 0x59ddff;
+/** Sample `count` points uniformly across the mesh surface (area-weighted). */
+function sampleSurface(
+  pos: Float32Array,
+  index: { array: Uint16Array | Uint32Array } | null,
+  count: number,
+): [number, number, number][] {
+  const tris: [number, number, number][] = [];
+  if (index) {
+    for (let i = 0; i < index.array.length; i += 3) {
+      tris.push([index.array[i] * 3, index.array[i + 1] * 3, index.array[i + 2] * 3]);
+    }
+  } else {
+    const vc = pos.length / 3;
+    for (let i = 0; i + 2 < vc; i += 3) tris.push([i * 3, (i + 1) * 3, (i + 2) * 3]);
+  }
+
+  // area-weighted triangle pick
+  const area = (t: [number, number, number]) => {
+    const ax = pos[t[0]], bx = pos[t[1]], cx = pos[t[2]];
+    const ux = bx - ax, uy = bx + 1 - (ax + 1), uz = bx + 2 - (ax + 2);
+    const wx = cx - ax, wy = cx + 1 - (ax + 1), wz = cx + 2 - (ax + 2);
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+    return 0.5 * Math.hypot(nx, ny, nz);
+  };
+  const areas = tris.map(area);
+  const total = areas.reduce((s, a) => s + a, 0);
+
+  const out: [number, number, number][] = [];
+  for (let k = 0; k < count; k++) {
+    let r = Math.random() * total;
+    let ti = 0;
+    for (let i = 0; i < areas.length; i++) { r -= areas[i]; if (r <= 0) { ti = i; break; } }
+    const t = tris[ti];
+    const x0 = pos[t[0]], y0 = pos[t[0] + 1], z0 = pos[t[0] + 2];
+    const x1 = pos[t[1]], y1 = pos[t[1] + 1], z1 = pos[t[1] + 2];
+    const x2 = pos[t[2]], y2 = pos[t[2] + 1], z2 = pos[t[2] + 2];
+    let u = Math.random(), v = Math.random();
+    if (u + v > 1) { u = 1 - u; v = 1 - v; }
+    out.push([
+      x0 + u * (x1 - x0) + v * (x2 - x0),
+      y0 + u * (y1 - y0) + v * (y2 - y0),
+      z0 + u * (z1 - z0) + v * (z2 - z0),
+    ]);
+  }
+  return out;
+}
 
 export function HoloFace({ status, listening, mini = false, micPeakRef, ttsPeakRef }: HoloFaceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -67,7 +110,11 @@ export function HoloFace({ status, listening, mini = false, micPeakRef, ttsPeakR
     const headGroup = new THREE.Group();
     scene.add(headGroup);
 
-    const parts: FacePart[] = [];
+    let faceGeo: THREE.BufferGeometry | null = null;
+    let faceBase: Float32Array | null = null;
+    let faceRegions: Region[] = [];
+    let eyeGeo: THREE.BufferGeometry | null = null;
+    let eyeBase: Float32Array | null = null;
     let loaded = false;
     let mouthOpen = 0;
     let excitement = 0;
@@ -82,59 +129,68 @@ export function HoloFace({ status, listening, mini = false, micPeakRef, ttsPeakR
       '/head.glb',
       (gltf) => {
         gltf.scene.updateMatrixWorld(true);
+        const facePts: [number, number, number][] = [];
+        const eyePts: [number, number, number][] = [];
+        const faceReg: Region[] = [];
+
         gltf.scene.traverse((obj) => {
           const mesh = obj as THREE.Mesh;
-          if (!(mesh as THREE.Mesh).isMesh) return;
+          if (!mesh.isMesh) return;
           if (!HEAD_MESH_RE.test(mesh.name)) return;
-
           const geom = mesh.geometry.clone();
-          const mat = new THREE.PointsMaterial({
-            color: HOLO_COLOR,
-            size: 0.034,
-            sizeAttenuation: true,
-            transparent: true,
-            opacity: 0.95,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-          });
-          const points = new THREE.Points(geom, mat);
-          // Preserve the mesh's world transform without baking (keeps morph
-          // deltas in local space).
-          const p = new THREE.Vector3();
-          const q = new THREE.Quaternion();
-          const s = new THREE.Vector3();
-          mesh.matrixWorld.decompose(p, q, s);
-          points.position.copy(p);
-          points.quaternion.copy(q);
-          points.scale.copy(s);
-          headGroup.add(points);
-
-          const base = (geom.attributes.position.array as Float32Array).slice();
-          const deltas: Float32Array[] = [];
-          if (geom.morphAttributes.position) {
-            for (const m of geom.morphAttributes.position) {
-              deltas.push((m.array as Float32Array).slice());
-            }
+          geom.applyMatrix4(mesh.matrixWorld); // bake to world space
+          const pos = geom.attributes.position.array as Float32Array;
+          const isEye = mesh.name.startsWith('Eye');
+          const n = isEye ? 120 : mesh.name === 'Wolf3D_Head' ? 3600 : 220;
+          const samples = sampleSurface(pos, geom.index as { array: Uint16Array | Uint32Array } | null, n);
+          for (const p of samples) {
+            if (isEye) eyePts.push(p);
+            else { facePts.push(p); faceReg.push(regionOf(p[0], p[1])); }
           }
-          const morphIndex: Record<string, number> = {};
-          const dict = (mesh as THREE.Mesh).morphTargetDictionary;
-          if (dict) for (const [name, idx] of Object.entries(dict)) morphIndex[name] = idx as number;
-
-          parts.push({ name: mesh.name, points, base, deltas, morphIndex, isEye: mesh.name.startsWith('Eye') });
         });
 
-        // Center + scale the head to fill the view nicely.
-        const box = new THREE.Box3().setFromObject(headGroup);
-        const center = box.getCenter(new THREE.Vector3());
-        const maxDim = Math.max(...(box.getSize(new THREE.Vector3()).toArray()));
-        for (const child of headGroup.children) child.position.sub(center);
-        headGroup.scale.setScalar(2.0 / Math.max(maxDim, 0.0001));
+        // Center + scale the merged point cloud (head ~0.31 world units tall).
+        const all = facePts.concat(eyePts);
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        for (const p of all) {
+          if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
+          if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1];
+          if (p[2] < minZ) minZ = p[2]; if (p[2] > maxZ) maxZ = p[2];
+        }
+        const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+        const maxDim = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
+        const s = 2.0 / maxDim;
+        const tf = (p: [number, number, number]) => [(p[0] - cx) * s, (p[1] - cy) * s, (p[2] - cz) * s];
+
+        const faceT = facePts.map(tf);
+        const eyeT = eyePts.map(tf);
+
+        faceRegions = faceReg.slice();
+        faceBase = new Float32Array(faceT.flat());
+        faceGeo = new THREE.BufferGeometry();
+        faceGeo.setAttribute('position', new THREE.BufferAttribute(faceBase.slice(), 3));
+
+        eyeBase = new Float32Array(eyeT.flat());
+        eyeGeo = new THREE.BufferGeometry();
+        eyeGeo.setAttribute('position', new THREE.BufferAttribute(eyeBase.slice(), 3));
+
+        const faceMat = new THREE.PointsMaterial({
+          color: HOLO_COLOR, size: 0.016, sizeAttenuation: true, transparent: true,
+          opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        const eyeMat = new THREE.PointsMaterial({
+          color: HOLO_COLOR, size: 0.02, sizeAttenuation: true, transparent: true,
+          opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        headGroup.add(new THREE.Points(faceGeo, faceMat));
+        headGroup.add(new THREE.Points(eyeGeo, eyeMat));
 
         loaded = true;
-        console.log('[holoface] loaded', parts.map((p) => `${p.name}(${p.base.length / 3}v ${Object.keys(p.morphIndex).join('/')})`).join(' '));
+        console.log('[holoface] v3 loaded', facePts.length, 'face pts,', eyePts.length, 'eye pts');
       },
       undefined,
-      (err) => console.error('[holoface] failed to load head.glb:', err),
+      (err) => console.error('[holoface] load error:', err),
     );
 
     const tick = (now: number) => {
@@ -160,36 +216,34 @@ export function HoloFace({ status, listening, mini = false, micPeakRef, ttsPeakR
       blinking = Math.max(0, blinking - dt * 9);
 
       const disconnected = st === 'disconnected' || st === 'connecting';
-      const baseOpacity = disconnected ? 0.35 : 1;
+      const baseOpacity = disconnected ? 0.4 : 1;
       const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-      headGroup.rotation.y = reduced ? 0 : Math.sin(time * 0.42) * 0.32;
-      headGroup.position.y = reduced ? 0 : Math.sin(time * 0.9) * 0.04;
+      headGroup.rotation.y = reduced ? 0 : Math.sin(time * 0.35) * 0.45;
+      headGroup.position.y = reduced ? 0 : Math.sin(time * 0.9) * 0.05;
 
-      const smile = 0.14 + excitement * 0.28 + (isListening ? 0.05 : 0);
-      const blinkFactor = (1 - blinking) * 1.0;
-
-      if (loaded) {
-        for (const part of parts) {
-          const posArr = part.points.geometry.attributes.position.array as Float32Array;
-          posArr.set(part.base);
-
-          const wOpen = part.morphIndex.mouthOpen !== undefined ? Math.min(1, mouthOpen * 2.6) : 0;
-          const wSmile = part.morphIndex.mouthSmile !== undefined ? smile : 0;
-          if (wOpen !== 0 && part.deltas[part.morphIndex.mouthOpen]) {
-            const d = part.deltas[part.morphIndex.mouthOpen];
-            for (let i = 0; i < posArr.length; i++) posArr[i] += d[i] * wOpen;
+      if (loaded && faceGeo && faceBase) {
+        // Jaw drop: jaw region moves DOWN + slightly FORWARD with speech.
+        const jawDrop = mouthOpen * 0.16;
+        const jawFwd = mouthOpen * 0.05;
+        const arr = (faceGeo.getAttribute('position') as THREE.BufferAttribute).array as Float32Array;
+        for (let i = 0; i < faceRegions.length; i++) {
+          const o = i * 3;
+          if (faceRegions[i] === 'jaw') {
+            arr[o] = faceBase[o];
+            arr[o + 1] = faceBase[o + 1] - jawDrop;
+            arr[o + 2] = faceBase[o + 2] + jawFwd;
+          } else {
+            arr[o] = faceBase[o];
+            arr[o + 1] = faceBase[o + 1];
+            arr[o + 2] = faceBase[o + 2];
           }
-          if (wSmile !== 0 && part.deltas[part.morphIndex.mouthSmile]) {
-            const d = part.deltas[part.morphIndex.mouthSmile];
-            for (let i = 0; i < posArr.length; i++) posArr[i] += d[i] * wSmile;
-          }
-          part.points.geometry.attributes.position.needsUpdate = true;
-
-          let opacity = 0.9 * baseOpacity;
-          if (part.isEye) opacity *= 0.12 + 0.88 * blinkFactor; // blink via fade
-          (part.points.material as THREE.PointsMaterial).opacity = opacity;
         }
+        (faceGeo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+      }
+      if (loaded && eyeGeo && eyeBase) {
+        const eyeMat = (headGroup.children[1] as THREE.Points).material as THREE.PointsMaterial;
+        eyeMat.opacity = (0.95 * baseOpacity) * (0.1 + 0.9 * (1 - blinking));
       }
 
       renderer.render(scene, camera);
@@ -198,8 +252,8 @@ export function HoloFace({ status, listening, mini = false, micPeakRef, ttsPeakR
     raf = requestAnimationFrame(tick);
 
     const onResize = () => {
-      const s = container.clientWidth || 220;
-      renderer.setSize(s, s);
+      const s2 = container.clientWidth || 220;
+      renderer.setSize(s2, s2);
     };
     window.addEventListener('resize', onResize);
 
