@@ -1,0 +1,87 @@
+/* ============================================================
+ * HoloFace
+ *
+ * The face lives in a fixed, pointer-transparent layer above the app and
+ * is positioned by a spring in JS rather than by layout. The canvas keeps
+ * one fixed backing resolution for the whole session, so moving it between
+ * the hero and the session bar costs nothing but a composited transform.
+ * ============================================================ */
+
+:root {
+  --holo-core: #f2f9ff; /* specular centre of each dot */
+  --holo-mid: #86dcff;  /* the body colour of the projection */
+  --holo-deep: #4b6ee0; /* far side of the volume — aerial perspective */
+  --holo-glow: rgba(134, 220, 255, 0.20);
+  --holo-scan: rgba(134, 220, 255, 0.13);
+}
+
+[data-theme='light'] {
+  --holo-core: #ffffff;
+  --holo-mid: #4aa8e8;
+  --holo-deep: #3d55c4;
+  --holo-glow: rgba(74, 168, 232, 0.16);
+  --holo-scan: rgba(74, 168, 232, 0.10);
+}
+
+.holo-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  contain: strict;
+}
+
+.holo-host {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.holo-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The glow sits behind the dots and tracks the same transform, so the head
+   carries its own light with it as it moves. */
+.holo-host::before {
+  content: '';
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 44%, var(--holo-glow), transparent 68%);
+  filter: blur(6px);
+  z-index: -1;
+}
+
+/* ── Anchors ────────────────────────────────────────────────────────
+   Empty, invisible elements that reserve the space the face flies to.
+   Only one is mounted at a time; the face springs to whichever it finds. */
+
+.holo-anchor {
+  display: block;
+  flex: none;
+  pointer-events: none;
+}
+
+.holo-anchor--hero {
+  width: min(52vw, 340px);
+  aspect-ratio: 1;
+}
+
+.holo-anchor--dock {
+  width: 86px;
+  aspect-ratio: 1;
+}
+
+@media (max-width: 720px) {
+  .holo-anchor--hero { width: min(72vw, 290px); }
+  .holo-anchor--dock { width: 64px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .holo-host { will-change: auto; }
+}

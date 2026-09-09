@@ -8,8 +8,11 @@ const OUTPUT_SAMPLE_RATE = 24000;
  * Uses a scheduled playback cursor so chunks play back-to-back without gaps.
  *
  * Also reports a live output level (0-1) through onLevel, computed from an
- * AnalyserNode on the output chain — this drives the orb's audio reactivity
- * while the agent speaks.
+ * AnalyserNode on the output chain.
+ *
+ * The AnalyserNode itself is exposed through `analyserRef` so HoloFace can
+ * read the full spectrum rather than a single amplitude. Lip sync needs the
+ * formant structure — loudness alone cannot tell an "ooh" from an "eee".
  */
 export function useAudioPlayback(onLevel?: (level: number) => void) {
   const ctxRef = useRef<AudioContext | null>(null);
@@ -32,7 +35,10 @@ export function useAudioPlayback(onLevel?: (level: number) => void) {
       // way to the speakers, so the orb reacts to the agent's voice.
       const analyser = ctxRef.current.createAnalyser();
       analyser.fftSize = 1024;
-      analyser.smoothingTimeConstant = 0.4;
+      // Kept low on purpose: the built-in smoothing blurs the consonant
+      // transients that mark word boundaries, and the lip-sync analyser
+      // applies its own asymmetric attack/release afterwards.
+      analyser.smoothingTimeConstant = 0.22;
       analyser.connect(ctxRef.current.destination);
       analyserRef.current = analyser;
     }
@@ -141,5 +147,5 @@ export function useAudioPlayback(onLevel?: (level: number) => void) {
     analyserRef.current = null;
   }
 
-  return { playChunk, flush, stop };
+  return { playChunk, flush, stop, analyserRef };
 }

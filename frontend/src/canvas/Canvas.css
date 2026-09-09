@@ -23,6 +23,7 @@
 }
 
 .canvas-cell {
+  position: relative;
   flex: 1 1 240px;
   min-width: 200px;
   height: 340px;
@@ -43,6 +44,40 @@
     box-shadow 0.3s ease;
 }
 
+/* Widgets are projected in rather than popped in, and the sweep that runs
+   down a new cell is the same one that runs over the face when it moves —
+   the canvas and the projection should read as one system, not two. */
+@keyframes cell-materialize {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes cell-scan {
+  from { transform: translateY(-110%); opacity: 0.85; }
+  to   { transform: translateY(240%); opacity: 0; }
+}
+
+.canvas-cell {
+  animation: cell-materialize 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.canvas-cell::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 42%;
+  pointer-events: none;
+  z-index: 2;
+  background: linear-gradient(to bottom, transparent, var(--holo-scan), transparent);
+  animation: cell-scan 0.8s cubic-bezier(0.33, 0, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-cell { animation: none; }
+  .canvas-cell::after { display: none; }
+}
+
 /* The contextually relevant widget — owns the stage */
 .canvas-cell.focused {
   flex-grow: 3.2;
@@ -51,7 +86,7 @@
   transform: translateY(-2px) scale(1.01);
   box-shadow:
     0 14px 44px rgba(0, 0, 0, 0.45),
-    0 0 32px var(--orb-glow-soft);
+    0 0 32px var(--halo-soft);
 }
 
 /* Everything else compacts into slim columns until it's needed again */
@@ -68,7 +103,7 @@
   filter: saturate(1);
   box-shadow:
     0 14px 44px rgba(0, 0, 0, 0.45),
-    0 0 28px var(--orb-glow-soft);
+    0 0 28px var(--halo-soft);
 }
 
 /* Empty state (kept for safety; normally hidden by the hero orb) */

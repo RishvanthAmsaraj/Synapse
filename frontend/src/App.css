@@ -51,14 +51,7 @@
 
   --shadow-lg: 0 24px 60px -12px rgba(0, 0, 0, 0.7);
 
-  --orb-a: rgba(255, 255, 255, 0.95);
-  --orb-b: rgba(196, 181, 253, 0.85);
-  --orb-c: rgba(139, 116, 255, 0.92);
-  --orb-d: rgba(91, 63, 196, 0.95);
-  --orb-e: rgba(36, 24, 82, 0.98);
-  --orb-glow: rgba(139, 116, 255, 0.5);
-  --orb-glow-soft: rgba(139, 116, 255, 0.22);
-  --orb-ring: rgba(139, 116, 255, 0.45);
+  --halo-soft: rgba(139, 116, 255, 0.22);
 }
 
 [data-theme='light'] {
@@ -87,14 +80,7 @@
 
   --shadow-lg: 0 24px 60px -12px rgba(20, 20, 60, 0.25);
 
-  --orb-a: rgba(255, 255, 255, 0.98);
-  --orb-b: rgba(216, 206, 255, 0.9);
-  --orb-c: rgba(152, 132, 255, 0.9);
-  --orb-d: rgba(110, 86, 220, 0.9);
-  --orb-e: rgba(70, 52, 140, 0.92);
-  --orb-glow: rgba(139, 116, 255, 0.4);
-  --orb-glow-soft: rgba(139, 116, 255, 0.18);
-  --orb-ring: rgba(139, 116, 255, 0.4);
+  --halo-soft: rgba(139, 116, 255, 0.18);
 }
 
 *, *::before, *::after {
@@ -188,7 +174,7 @@ html, body {
   border-radius: 50%;
   margin-right: 10px;
   background: var(--accent);
-  box-shadow: 0 0 10px var(--accent), 0 0 22px var(--orb-glow-soft);
+  box-shadow: 0 0 10px var(--accent), 0 0 22px var(--halo-soft);
   vertical-align: middle;
 }
 
@@ -214,6 +200,11 @@ html, body {
   -webkit-backdrop-filter: blur(14px);
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
+.toolbar-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .toolbar-btn:hover {
   background: var(--surface-3);
   border-color: var(--border-strong);
@@ -232,171 +223,18 @@ html, body {
   gap: 8px;
 }
 
-/* ===== Hero + Orb ===== */
+/* ===== Hero — the projection owns the stage =====
+   The face itself is drawn in a fixed layer (see HoloFace.css); everything
+   here just reserves the space it flies to and lights the ground under it. */
 .hero {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 30px;
+  gap: 26px;
   min-height: 0;
-  transition: flex 0.5s cubic-bezier(0.22, 1, 0.36, 1);
-  padding-bottom: 40px;
-}
-
-.orb-wrap {
-  position: relative;
-  width: 200px;
-  height: 200px;
-  flex-shrink: 0;
-  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
-  animation: orb-breathe 5s ease-in-out infinite;
-}
-
-/* soft halo behind the core — brightness driven by live audio level */
-.orb-aura {
-  position: absolute;
-  inset: -30%;
-  border-radius: 50%;
-  background: radial-gradient(circle, var(--orb-glow) 0%, transparent 62%);
-  filter: blur(28px);
-  opacity: 0.28;
-  pointer-events: none;
-  transition: opacity 120ms linear;
-  animation: orb-hue-drift 26s ease-in-out infinite;
-}
-
-.orb-core {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: radial-gradient(circle at 34% 30%,
-    var(--orb-a) 0%,
-    var(--orb-b) 10%,
-    var(--orb-c) 32%,
-    var(--orb-d) 62%,
-    var(--orb-e) 100%);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.05),
-    0 0 48px var(--orb-glow),
-    0 0 120px var(--orb-glow-soft),
-    inset 0 -26px 52px rgba(4, 3, 12, 0.55),
-    inset 0 14px 28px rgba(255, 255, 255, 0.14);
-  transition: filter 0.5s ease, box-shadow 0.5s ease;
-  will-change: transform, border-radius;
-  /* Liquid identity: the sphere is never a perfect circle — its outline
-     slowly undulates like a blob of light held together by surface tension.
-     (No filter animation here: state rules own `filter` for dimming.) */
-  animation: orb-blob-morph 9s ease-in-out infinite alternate;
-}
-
-/* inner caustic layer — counter-morphing, catches light like liquid glass */
-.orb-core::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(circle at 64% 68%,
-    rgba(255, 255, 255, 0.22) 0%,
-    rgba(255, 255, 255, 0.05) 22%,
-    transparent 48%);
-  animation: orb-blob-morph 7s ease-in-out infinite alternate-reverse;
-  pointer-events: none;
-}
-
-@keyframes orb-blob-morph {
-  0%   { border-radius: 50% 50% 50% 50% / 50% 50% 50% 50%; }
-  25%  { border-radius: 43% 57% 51% 49% / 55% 45% 55% 45%; }
-  50%  { border-radius: 57% 43% 44% 56% / 44% 56% 46% 54%; }
-  75%  { border-radius: 46% 54% 58% 42% / 52% 45% 55% 48%; }
-  100% { border-radius: 50% 50% 50% 50% / 50% 50% 50% 50%; }
-}
-
-@keyframes orb-hue-drift {
-  0%, 100% { filter: blur(28px) hue-rotate(0deg); }
-  50%      { filter: blur(28px) hue-rotate(-14deg); }
-}
-
-/* glassy sheen that slowly orbits the sphere */
-.orb-sheen {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  pointer-events: none;
-  background: conic-gradient(from 40deg,
-    transparent 0%, rgba(255, 255, 255, 0.16) 9%, transparent 24%,
-    transparent 52%, rgba(255, 255, 255, 0.08) 64%, transparent 80%);
-  animation: orb-sheen-spin 18s linear infinite;
-  mix-blend-mode: screen;
-}
-
-/* sonar rings (listening only) */
-.orb-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 1.5px solid var(--orb-ring);
-  opacity: 0;
-  pointer-events: none;
-}
-
-@keyframes orb-breathe {
-  0%, 100% { transform: scale(1); }
-  50%      { transform: scale(1.035); }
-}
-@keyframes orb-sheen-spin {
-  to { transform: rotate(360deg); }
-}
-@keyframes ring-expand {
-  0%   { opacity: 0.65; transform: scale(1); }
-  100% { opacity: 0;     transform: scale(2); }
-}
-
-/* ── Orb states ── */
-.orb-wrap.orb--disconnected { animation: orb-breathe 6s ease-in-out infinite; }
-.orb-wrap.orb--disconnected .orb-core {
-  filter: saturate(0.55) brightness(0.88);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.05),
-    0 0 30px var(--orb-glow-soft),
-    0 0 80px rgba(139, 116, 255, 0.08),
-    inset 0 -26px 52px rgba(4, 3, 12, 0.5),
-    inset 0 14px 28px rgba(255, 255, 255, 0.12);
-}
-
-.orb-wrap.orb--connecting { animation: orb-breathe 2.2s ease-in-out infinite; }
-.orb-wrap.orb--connecting .orb-core {
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.05),
-    0 0 40px var(--orb-glow-soft),
-    0 0 90px var(--orb-glow-soft),
-    inset 0 -26px 52px rgba(4, 3, 12, 0.55),
-    inset 0 14px 28px rgba(255, 255, 255, 0.14);
-}
-
-.orb-wrap.orb--idle { animation: orb-breathe 4s ease-in-out infinite; }
-.orb-wrap.orb--idle .orb-core {
-  filter: saturate(1) brightness(1.02);
-}
-
-.orb-wrap.orb--listening { animation: orb-breathe 1.7s ease-in-out infinite; }
-.orb-wrap.orb--listening .orb-core {
-  filter: saturate(1.25) brightness(1.1);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.07),
-    0 0 64px var(--orb-glow),
-    0 0 160px var(--orb-glow-soft),
-    0 0 260px var(--orb-glow-soft),
-    inset 0 -26px 52px rgba(4, 3, 12, 0.5),
-    inset 0 14px 28px rgba(255, 255, 255, 0.16);
-}
-.orb-wrap.orb--listening .orb-ring { animation: ring-expand 2.4s ease-out infinite; }
-.orb-wrap.orb--listening .orb-ring.r2 { animation-delay: 0.8s; }
-.orb-wrap.orb--listening .orb-ring.r3 { animation-delay: 1.6s; }
-
-@media (prefers-reduced-motion: reduce) {
-  .orb-wrap, .orb-core, .orb-core::after, .orb-aura, .orb-sheen, .orb-ring { animation: none !important; }
+  padding-bottom: 34px;
 }
 
 /* ===== Hero status ===== */
@@ -423,7 +261,7 @@ html, body {
 .live-dot.live-connecting { background: var(--warning); box-shadow: 0 0 10px var(--warning); }
 .live-dot.live-recording {
   background: var(--accent);
-  box-shadow: 0 0 12px var(--accent), 0 0 26px var(--orb-glow-soft);
+  box-shadow: 0 0 12px var(--accent), 0 0 26px var(--halo-soft);
   animation: live-pulse 1.6s ease-in-out infinite;
 }
 @keyframes live-pulse {
@@ -447,22 +285,30 @@ html, body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 24px 20px;
+  padding: 10px 24px 18px;
   flex-shrink: 0;
   position: relative;
   z-index: 5;
 }
 
+/* A hairline that fades in under the stage once widgets are up, so the bar
+   reads as a floor for the canvas rather than as another floating element. */
+.session-bar::before {
+  content: '';
+  position: absolute;
+  inset-inline: 24px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(to right,
+    transparent, var(--border-strong) 18%, var(--border-strong) 82%, transparent);
+  opacity: 0.7;
+}
+
 .session-voice {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   min-width: 0;
-}
-
-.orb-wrap.mini {
-  width: 54px;
-  height: 54px;
 }
 
 .session-controls {
@@ -496,6 +342,11 @@ html, body {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
@@ -507,10 +358,10 @@ html, body {
 .btn-start {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
-  box-shadow: 0 4px 26px -4px var(--orb-glow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  box-shadow: 0 4px 26px -4px var(--accent-border), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .btn-start:not(:disabled):hover {
-  box-shadow: 0 6px 34px -4px var(--orb-glow), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  box-shadow: 0 6px 34px -4px var(--accent-border), inset 0 1px 0 rgba(255, 255, 255, 0.3);
   filter: brightness(1.06);
 }
 

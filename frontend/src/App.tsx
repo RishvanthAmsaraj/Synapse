@@ -38,7 +38,13 @@ function AppInner() {
   const micPeakRef = useRef<number>(0);
   const ttsPeakRef = useRef<number>(0);
 
-  const { playChunk, flush, stop } = useAudioPlayback(
+  // The face is mounted once, outside the layout branches, and flies to
+  // whichever anchor is currently on screen. Keeping one WebGL context alive
+  // for the whole session is what makes the hero/dock move continuous.
+  const holoAnchorRef = useRef<HTMLElement | null>(null);
+  const [interruptSignal, setInterruptSignal] = useState(0);
+
+  const { playChunk, flush, stop, analyserRef } = useAudioPlayback(
     useCallback((level: number) => {
       ttsPeakRef.current = Math.max(ttsPeakRef.current, level);
     }, [])
@@ -370,6 +376,7 @@ function AppInner() {
       addLog('interrupted → SPPE rollback, flush audio, cancel highlights');
       flush();
       clearPendingHighlights();
+      setInterruptSignal((n) => n + 1);
 
       // SPPE rollback: notify runtime, revert widgets to last committed state
       const sppe = sppeRef.current;
@@ -490,7 +497,10 @@ function AppInner() {
         {!hasWidgets ? (
           <>
             <section className="hero">
-              <HoloFace status={status} listening={isRecording} micPeakRef={micPeakRef} ttsPeakRef={ttsPeakRef} />
+              <div
+                className="holo-anchor holo-anchor--hero"
+                ref={(el) => { holoAnchorRef.current = el; }}
+              />
               {statusEl}
             </section>
             <div className="controls-bar">{sessionControls}</div>
@@ -500,7 +510,10 @@ function AppInner() {
             <Canvas />
             <div className="session-bar">
               <div className="session-voice">
-                <HoloFace status={status} listening={isRecording} mini micPeakRef={micPeakRef} ttsPeakRef={ttsPeakRef} />
+                <div
+                  className="holo-anchor holo-anchor--dock"
+                  ref={(el) => { holoAnchorRef.current = el; }}
+                />
                 {statusEl}
               </div>
               <div className="session-controls">
@@ -511,6 +524,16 @@ function AppInner() {
           </>
         )}
       </main>
+
+      <HoloFace
+        status={status}
+        listening={isRecording}
+        layout={hasWidgets ? 'docked' : 'hero'}
+        anchorRef={holoAnchorRef}
+        analyserRef={analyserRef}
+        micPeakRef={micPeakRef}
+        interruptSignal={interruptSignal}
+      />
 
       <DebugPanel logs={logs} events={events} frontiers={frontiers} conflicts={conflicts} />
     </div>
@@ -549,8 +572,12 @@ function DebugPanel({ logs, events, frontiers, conflicts }:
     return base;
   }
 
+  // Collapsed, this is a small pill in the corner. It only takes real estate
+  // once someone actually opens it — the face is the product, the SPPE log is
+  // a developer tool that happens to live in the same window.
   const panelStyle: React.CSSProperties = {
-    position: 'fixed', bottom: 12, right: 12, width: 480, zIndex: 9999,
+    position: 'fixed', bottom: 12, right: 12,
+    width: open ? 440 : 'auto', zIndex: 9999,
     background: 'var(--surface)',
     border: '1px solid var(--border-strong)',
     borderRadius: 12,
@@ -567,8 +594,11 @@ function DebugPanel({ logs, events, frontiers, conflicts }:
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '6px 10px',
+        gap: 10,
+        padding: open ? '6px 10px' : '5px 11px',
         borderBottom: open ? '1px solid var(--border)' : 'none',
+        opacity: open ? 1 : 0.55,
+        transition: 'opacity 0.2s ease',
         cursor: 'pointer', userSelect: 'none',
         color: 'var(--text-muted)',
         fontWeight: 600,
