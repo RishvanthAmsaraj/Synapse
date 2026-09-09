@@ -90,10 +90,10 @@ export function HoloFace({ status, listening, mini = false, micPeakRef, ttsPeakR
           const geom = mesh.geometry.clone();
           const mat = new THREE.PointsMaterial({
             color: HOLO_COLOR,
-            size: 0.018,
+            size: 0.034,
             sizeAttenuation: true,
             transparent: true,
-            opacity: 0.9,
+            opacity: 0.95,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
           });
@@ -174,7 +174,7 @@ export function HoloFace({ status, listening, mini = false, micPeakRef, ttsPeakR
           const posArr = part.points.geometry.attributes.position.array as Float32Array;
           posArr.set(part.base);
 
-          const wOpen = part.morphIndex.mouthOpen !== undefined ? mouthOpen : 0;
+          const wOpen = part.morphIndex.mouthOpen !== undefined ? Math.min(1, mouthOpen * 2.6) : 0;
           const wSmile = part.morphIndex.mouthSmile !== undefined ? smile : 0;
           if (wOpen !== 0 && part.deltas[part.morphIndex.mouthOpen]) {
             const d = part.deltas[part.morphIndex.mouthOpen];
