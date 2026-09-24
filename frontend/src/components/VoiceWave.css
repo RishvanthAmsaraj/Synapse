@@ -1,0 +1,6 @@
+/* Colour is the whole indicator — no filters, so the canvas gradient reads
+   exactly as drawn in both themes. */
+.voice-wave {
+  display: block;
+  flex: none;
+}

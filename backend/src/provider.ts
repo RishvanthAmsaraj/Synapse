@@ -6,7 +6,7 @@
 // createProvider, nothing else.
 // ---------------------------------------------------------------------------
 
-import { GoogleGenAI, Modality } from '@google/genai';
+import { GoogleGenAI, Modality, StartSensitivity, EndSensitivity } from '@google/genai';
 
 // Config assembled from env + persona + tool declarations.
 export interface VoiceProviderConfig {
@@ -28,6 +28,8 @@ export interface VoiceProviderCallbacks {
   onInterrupted: () => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onToolCalls: (functionCalls: any[]) => void;
+  /** Rolling transcript of what the model is saying, for captions/debug. */
+  onOutputTranscript?: (text: string) => void;
   onClosed: () => void;       // recovery exhausted — signal the client to reconnect
 }
 
@@ -72,6 +74,47 @@ class GeminiLiveProvider implements VoiceProvider {
           },
         },
         tools: [{ functionDeclarations: this.config.tools }],
+
+        // Voice activity detection.
+        //
+        // These two knobs pull in opposite directions and I previously set
+        // both the wrong way round.
+        //
+        // startOfSpeechSensitivity governs how readily the model accepts that
+        // YOU have started talking — which is exactly what barge-in is. LOW
+        // made it hard to interrupt and made it drop short utterances
+        // altogether. It is HIGH now; echo from the speakers is handled where
+        // it should be, by echo cancellation on the microphone, not by making
+        // the agent hard of hearing.
+        //
+        // endOfSpeechSensitivity governs how eagerly it decides you have
+        // FINISHED. LOW is the patient setting, and it is what lets a long
+        // multi-part question survive the pauses inside it — so the silence
+        // window no longer has to be padded out to compensate, which is where
+        // the response delay was coming from.
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+            endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
+            // Short enough that "wait—" registers as an interruption.
+            prefixPaddingMs: 100,
+            // This is the single largest fixed cost in a turn: the model waits
+            // this long after you stop before it will even begin. Every ms
+            // here is felt directly as "it takes a second to answer". It is
+            // safe to keep it short because endOfSpeechSensitivity is LOW —
+            // that is what protects the pauses inside a long question, so the
+            // silence window does not have to do that job as well.
+            // 450ms was too eager: a long multi-part request has pauses in
+            // it, and ending the turn on one delivers half a sentence — the
+            // model then has nothing coherent to answer, which reads as it
+            // ignoring you. Start sensitivity stays HIGH so barge-in is
+            // unaffected by this.
+            silenceDurationMs: 620,
+          },
+        },
+
+        // Gives us the text of what the model is currently saying.
+        outputAudioTranscription: {},
       },
       callbacks: {
         onopen: () => {
@@ -90,6 +133,9 @@ class GeminiLiveProvider implements VoiceProvider {
               this.callbacks.onAudio(part.inlineData.data, part.inlineData.mimeType);
             }
           }
+          const outText = message.serverContent?.outputTranscription?.text;
+          if (outText) this.callbacks.onOutputTranscript?.(outText);
+
           if (message.serverContent?.turnComplete) this.callbacks.onTurnComplete();
           if (message.serverContent?.interrupted) this.callbacks.onInterrupted();
 
@@ -129,8 +175,26 @@ class GeminiLiveProvider implements VoiceProvider {
     });
   }
 
+  /**
+   * Inject silent context (canvas state) WITHOUT provoking a reply.
+   *
+   * This used to call sendRealtimeInput({ text }). Per the Live API,
+   * "detected voice and text input count as activity" — so realtime text ends
+   * the user's turn and makes the model answer it. Since the client injects
+   * canvas state on every turn_complete, that formed a loop: the model would
+   * finish speaking, receive the status line as if the user had spoken, reply
+   * to it, complete another turn, and go round again roughly once a second.
+   * That is the "it keeps asking what can I help you with" behaviour.
+   *
+   * sendClientContent with turnComplete: false appends to the context in
+   * order and generates nothing. The status line then rides along with the
+   * user's next real utterance, which is what it was always meant to do.
+   */
   sendText(text: string): void {
-    this.session?.sendRealtimeInput({ text });
+    this.session?.sendClientContent({
+      turns: [{ role: 'user', parts: [{ text }] }],
+      turnComplete: false,
+    });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

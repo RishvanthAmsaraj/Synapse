@@ -36,14 +36,19 @@ export const EMOTIONS: Record<Emotion, AUMap> = {
     lipsPress: 0.12,
   },
   neutral: {
-    browOuterUpL: 0.05, browOuterUpR: 0.04,
-    lipCornerPullL: 0.06, lipCornerPullR: 0.05,
+    // Deliberately no lip corner pull. A resting face is not smiling, and a
+    // held smile with nothing behind it is the single most unsettling thing a
+    // synthetic face can do.
+    browOuterUpL: 0.03, browOuterUpR: 0.02,
+    lipsPress: 0.04,
   },
   attentive: {
-    browInnerUpL: 0.18, browInnerUpR: 0.16,
-    browOuterUpL: 0.24, browOuterUpR: 0.22,
-    eyeWideL: 0.26, eyeWideR: 0.24,
-    lipCornerPullL: 0.10, lipCornerPullR: 0.08,
+    // Interest, not surprise. The brow and lid values here were high enough
+    // that simply listening looked startled.
+    browInnerUpL: 0.10, browInnerUpR: 0.08,
+    browOuterUpL: 0.13, browOuterUpR: 0.11,
+    eyeWideL: 0.15, eyeWideR: 0.13,
+    lipCornerPullL: 0.02, lipCornerPullR: 0.015,
   },
   thinking: {
     browLowerL: 0.30, browLowerR: 0.22,
@@ -277,6 +282,17 @@ export class GazeController {
  * speech layers request. Attack and release are separate because faces
  * tense faster than they relax.
  */
+/**
+ * Articulator AUs. Coarticulation is now solved offline in visemeTrack, ahead
+ * of playback, so easing these here would only re-introduce the lag that was
+ * just removed. They get a short tau; everything expressive keeps the slower
+ * one, because faces tense fast and relax slowly.
+ */
+const FAST_AUS = new Set<string>([
+  'jawOpen', 'jawThrust', 'lipsPart', 'lipsPress', 'lipPucker',
+  'lipStretch', 'upperLipRaise', 'lowerLipDown', 'mtMouthOpen', 'mtMouthSmile',
+]);
+
 export class AUAnimator {
   current: Record<string, number> = {};
   private target: Record<string, number> = {};
@@ -292,7 +308,7 @@ export class AUAnimator {
     const b = (n: AUName, v: number) => { this.bias[n] = v; };
     b('browOuterUpL', 0.035);
     b('browInnerUpR', 0.022);
-    b('lipCornerPullL', 0.030);
+    b('lipCornerPullL', 0.014);
     b('squintR', 0.020);
   }
 
@@ -317,7 +333,9 @@ export class AUAnimator {
     for (const n of AU_NAMES) {
       const t = Math.max(-0.5, Math.min(1.35, this.target[n] ?? 0));
       const c = this.current[n];
-      const tau = t > c ? 0.055 : 0.105;
+      const tau = FAST_AUS.has(n)
+        ? (t > c ? 0.016 : 0.030)
+        : (t > c ? 0.055 : 0.105);
       this.current[n] = c + (t - c) * (1 - Math.exp(-dt / tau));
     }
   }

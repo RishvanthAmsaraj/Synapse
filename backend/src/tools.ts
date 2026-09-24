@@ -47,6 +47,15 @@ export const TOOL_SPECS: ToolSpec[] = [
       'You MUST call this every time you reference or show specific code — no exceptions. ' +
       'This applies even after an interruption. Call it without announcing it.',
     params: [
+      {
+        name: 'panel',
+        type: 'string',
+        description:
+          'Short slug naming this panel, e.g. "v8-engine", "firing-order", "merge-code". ' +
+          'Each distinct slug is its own panel on the canvas, so use a DIFFERENT slug for every ' +
+          'panel you want visible at the same time. Re-using a slug replaces that panel in place. ' +
+          'Lowercase, hyphenated, no spaces.',
+      },
       { name: 'language', type: 'string', description: 'Programming language for syntax highlighting, e.g. "python", "javascript".' },
       { name: 'code', type: 'string', description: 'The full code snippet to display.' },
     ],
@@ -60,6 +69,7 @@ export const TOOL_SPECS: ToolSpec[] = [
       'Provide the exact line numbers for that section. ' +
       'The canvas handles visual timing automatically — just call them in the correct order.',
     params: [
+      { name: 'panel', type: 'string', description: 'Slug of the code panel to highlight in — the same slug you passed to code_viewer_show.' },
       { name: 'start_line', type: 'number', description: 'First line of the section to highlight (1-indexed).' },
       { name: 'end_line', type: 'number', description: 'Last line of the section to highlight (1-indexed, inclusive).' },
     ],
@@ -73,9 +83,20 @@ export const TOOL_SPECS: ToolSpec[] = [
     widgetType: 'text',
     description:
       'Display a markdown text block on the visual canvas. ' +
+      'Several text panels can be open at once — give each one its own panel slug. ' +
       'Use for key points, step-by-step breakdowns, summaries, or any structured text that complements your speech. ' +
       'Supports **bold**, *italic*, headings, and nested lists.',
     params: [
+      {
+        name: 'panel',
+        type: 'string',
+        description:
+          'Short slug naming this panel, e.g. "v8-engine", "firing-order", "merge-code". ' +
+          'Each distinct slug is its own panel on the canvas, so use a DIFFERENT slug for every ' +
+          'panel you want visible at the same time. Re-using a slug replaces that panel in place. ' +
+          'Lowercase, hyphenated, no spaces.',
+      },
+      { name: 'title', type: 'string', description: 'Short heading for the panel, e.g. "How it works". Under five words.', required: false },
       { name: 'content', type: 'string', description: 'Markdown-formatted text. Use **bold** for emphasis, ## for headings, - for lists.' },
     ],
   },
@@ -88,9 +109,19 @@ export const TOOL_SPECS: ToolSpec[] = [
     widgetType: 'image',
     description:
       'Search for a relevant image or diagram and display it on the visual canvas. ' +
+      'Several images can be shown side by side — give each one its own panel slug. ' +
       'Call this when a visual illustration would complement the explanation. ' +
       'Pass a short subject noun phrase as the query.',
     params: [
+      {
+        name: 'panel',
+        type: 'string',
+        description:
+          'Short slug naming this panel, e.g. "v8-engine", "firing-order", "merge-code". ' +
+          'Each distinct slug is its own panel on the canvas, so use a DIFFERENT slug for every ' +
+          'panel you want visible at the same time. Re-using a slug replaces that panel in place. ' +
+          'Lowercase, hyphenated, no spaces.',
+      },
       {
         name: 'query',
         type: 'string',
@@ -111,6 +142,55 @@ export const TOOL_SPECS: ToolSpec[] = [
       'currently displayed widgets are no longer relevant to the conversation. ' +
       'Fresh widgets for the new topic should be brought up afterwards if the new topic needs them.',
     params: [],
+  },
+
+  {
+    name: 'activity_log',
+    widgetType: 'activity',
+    description:
+      'Append a step to a live activity feed — what is being done right now, which tool ran, ' +
+      'which page was opened, what came back. Intended above all for external agents driving ' +
+      'the canvas: reusing one panel slug builds a running log of the work rather than a pile ' +
+      'of panels. Send status "running" when a step starts and send the same label again with ' +
+      '"done" or "error" when it finishes.',
+    params: [
+      { name: 'panel', type: 'string', description: 'Slug of the activity panel. Reuse it to append to the same feed.' },
+      { name: 'label', type: 'string', description: 'Short name of the step, usually the tool that ran.' },
+      { name: 'detail', type: 'string', description: 'One line of detail: arguments, a result, an error.', required: false },
+      { name: 'url', type: 'string', description: 'A page that was opened, shown as a link.', required: false },
+      { name: 'status', type: 'string', description: 'One of "running", "done", "error". Defaults to "done".', required: false },
+    ],
+  },
+  {
+    name: 'close_panel',
+    widgetType: 'canvas',
+    description:
+      'Close one panel by its slug, leaving the rest of the canvas untouched. ' +
+      'Use this to retire a panel that is no longer relevant instead of clearing everything.',
+    params: [{ name: 'panel', type: 'string', description: 'Slug of the panel to close.' }],
+  },
+  {
+    name: 'arrange_panel',
+    widgetType: 'canvas',
+    description:
+      'Resize a panel on the canvas grid. The stage is 12 columns wide; rows are 1-4. ' +
+      'Use it to give a panel the room its content needs — a code walkthrough wants 6-8 columns ' +
+      'and 3 rows, a single image is fine at 3-4 columns. The user can also drag and resize ' +
+      'panels themselves, so treat the layout as shared rather than yours to enforce.',
+    params: [
+      { name: 'panel', type: 'string', description: 'Slug of the panel to resize.' },
+      { name: 'cols', type: 'number', description: 'Column span, 2-12.' },
+      { name: 'rows', type: 'number', description: 'Row span, 2-14. Eight rows is the full height of the stage.' },
+    ],
+  },
+  {
+    name: 'focus_panel',
+    widgetType: 'canvas',
+    description:
+      'Spotlight one panel — it expands to own the stage while the others compact aside. ' +
+      'Call it as you move between panels so the canvas follows what you are talking about. ' +
+      'This is presentation only; it never changes what a panel contains.',
+    params: [{ name: 'panel', type: 'string', description: 'Slug of the panel to bring forward.' }],
   },
 
   // ------------------------------------------------------------------

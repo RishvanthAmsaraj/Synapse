@@ -5,10 +5,16 @@
  * This ensures text is readable in both dark and light modes.
  */
 
+import { useEffect, useRef, useState } from 'react';
 import './TextWidget.css';
 
 export type TextWidgetData = {
   content: string;
+  /** Panel slug, so an edit can be attributed back to the right panel. */
+  panel?: string;
+  /** Optional heading. With several text panels open, this is how the user
+   *  tells them apart at a glance. */
+  title?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -85,9 +91,79 @@ function renderMarkdown(raw: string): React.ReactNode[] {
   return nodes;
 }
 
+/**
+ * TextWidget — and the first panel the user can write back into.
+ *
+ * Until now the canvas was one-directional: the agent could show you things,
+ * and you could only look at them. Double-clicking a text panel opens the raw
+ * markdown for editing, and committing it announces the change so the agent
+ * learns what you changed. That is the return channel — the difference
+ * between a display and a workspace two parties share.
+ *
+ * The edit is broadcast as a DOM event rather than a prop callback so widgets
+ * stay renderable from the registry without threading handlers through it.
+ */
 export function TextWidget({ data }: { data: TextWidgetData }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(data.content);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  // Agent updates win while you are not editing; they never overwrite a draft
+  // out from under you mid-edit.
+  useEffect(() => { if (!editing) setDraft(data.content); }, [data.content, editing]);
+  useEffect(() => { if (editing) ref.current?.focus(); }, [editing]);
+
+  function commit() {
+    setEditing(false);
+    if (draft === data.content) return;
+    // This event does two things: it writes the edit back into the panel so
+    // the change is actually kept, and it tells the agent what changed.
+    // Previously it only did the second, so an edit was announced and then
+    // immediately overwritten by the agent's original text on the next
+    // render — which looked exactly like "there is no way to save".
+    window.dispatchEvent(new CustomEvent('synapse:panel-edit', {
+      detail: { panel: data.panel ?? 'main', content: draft },
+    }));
+  }
+
+  function cancel() {
+    setDraft(data.content);
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div className="textwidget-container editing">
+        {data.title ? <h3 className="textwidget-title">{data.title}</h3> : null}
+        <textarea
+          ref={ref}
+          className="textwidget-edit"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+            // Enter saves; Shift+Enter is a newline. Markdown needs multi-line
+            // editing, so the modifier goes on the line break rather than on
+            // the save — saving is the thing you do far more often.
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit(); }
+          }}
+        />
+        <div className="textwidget-actions">
+          <span className="textwidget-hint">Enter to save · Shift+Enter for a new line</span>
+          <button type="button" className="tw-btn" onClick={cancel}>Cancel</button>
+          <button type="button" className="tw-btn tw-btn-primary" onClick={commit}>Save</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="textwidget-container">
+    <div
+      className="textwidget-container"
+      onDoubleClick={() => setEditing(true)}
+      title="Double-click to edit"
+    >
+      {data.title ? <h3 className="textwidget-title">{data.title}</h3> : null}
       {renderMarkdown(data.content)}
     </div>
   );

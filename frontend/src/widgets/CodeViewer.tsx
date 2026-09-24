@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import './CodeViewer.css';
@@ -58,3 +59,10 @@ export function CodeViewer({ data }: { data: CodeViewerData }) {
     </div>
   );
 }
+
+/**
+ * Syntax highlighting is synchronous and expensive, and this panel re-rendered
+ * on every layout change. Memoising on the data reference means moving or
+ * resizing a panel never re-highlights anything.
+ */
+export const MemoCodeViewer = memo(CodeViewer, (a, b) => a.data === b.data);

@@ -12,6 +12,8 @@ interface UseLiveSessionOptions {
   onInterrupted: () => void;
   onToolCall: (call: ToolCall) => void;
   onTurnComplete?: () => void;
+  /** Rolling text of what the agent is currently saying. */
+  onTranscript?: (text: string) => void;
 }
 
 /**
@@ -25,7 +27,7 @@ interface UseLiveSessionOptions {
  * - tool_call: Agent requested a widget action
  * - turn_complete: Agent finished speaking turn
  */
-export function useLiveSession({ onAudioChunk, onInterrupted, onToolCall, onTurnComplete }: UseLiveSessionOptions) {
+export function useLiveSession({ onAudioChunk, onInterrupted, onToolCall, onTurnComplete, onTranscript }: UseLiveSessionOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState<SessionStatus>('disconnected');
   // Set when the user presses Stop — suppresses auto-reconnect.
@@ -38,11 +40,13 @@ export function useLiveSession({ onAudioChunk, onInterrupted, onToolCall, onTurn
   const onInterruptedRef = useRef(onInterrupted);
   const onToolCallRef = useRef(onToolCall);
   const onTurnCompleteRef = useRef(onTurnComplete);
+  const onTranscriptRef = useRef(onTranscript);
 
   useEffect(() => { onAudioChunkRef.current = onAudioChunk; }, [onAudioChunk]);
   useEffect(() => { onInterruptedRef.current = onInterrupted; }, [onInterrupted]);
   useEffect(() => { onToolCallRef.current = onToolCall; }, [onToolCall]);
   useEffect(() => { onTurnCompleteRef.current = onTurnComplete; }, [onTurnComplete]);
+  useEffect(() => { onTranscriptRef.current = onTranscript; }, [onTranscript]);
 
   /** Shared message handler for initial connect + reconnects. */
   const handleMessage = (raw: unknown, onReady?: () => void) => {
@@ -64,6 +68,9 @@ export function useLiveSession({ onAudioChunk, onInterrupted, onToolCall, onTurn
         case 'tool_call':
           onToolCallRef.current({ name: msg.name as string, args: msg.args as Record<string, unknown> });
           break;
+        case 'transcript':
+          onTranscriptRef.current?.(msg.text as string);
+          break;
         case 'turn_complete':
           onTurnCompleteRef.current?.();
           break;
@@ -80,7 +87,12 @@ export function useLiveSession({ onAudioChunk, onInterrupted, onToolCall, onTurn
   /** Open a socket. Auto-reconnects with backoff unless the user stopped. */
   const openSocket = (onReady?: () => void) => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/live`);
+    // Persona rides on the connect URL: identity, voice and teaching style are
+    // fixed for the life of a Live session, so switching means reconnecting.
+    // It lives in a ref because openSocket is also the auto-reconnect path —
+    // dropping the connection must not silently change who is talking.
+    const q = personaRef.current ? `?persona=${encodeURIComponent(personaRef.current)}` : '';
+    const ws = new WebSocket(`${protocol}//${window.location.host}/api/live${q}`);
     wsRef.current = ws;
 
     ws.onmessage = (event) => handleMessage(event.data, onReady);
@@ -115,7 +127,8 @@ export function useLiveSession({ onAudioChunk, onInterrupted, onToolCall, onTurn
     };
   };
 
-  function connect(): Promise<void> {
+  function connect(persona?: string): Promise<void> {
+    personaRef.current = persona;
     return new Promise((resolve, reject) => {
       setStatus('connecting');
       manualCloseRef.current = false;
@@ -146,18 +159,29 @@ export function useLiveSession({ onAudioChunk, onInterrupted, onToolCall, onTurn
 
   /** Last context send timestamp — used to debounce rapid cycles */
   const lastSendRef = useRef(0);
+  /** Last context payload — identical state is not worth re-sending */
+  const lastTextRef = useRef<string>('');
+  /** Persona for this session, preserved across reconnects. */
+  const personaRef = useRef<string | undefined>(undefined);
 
   /** Minimum ms between context updates after turn_complete */
   const HOLD_MS = 300;
 
-  /** Inject canvas state into the model's context. Debounces rapid cycles. */
+  /**
+   * Inject canvas state into the model's context.
+   *
+   * Deduplicated as well as debounced: this fires on every turn_complete, and
+   * the canvas usually has not changed between turns. Re-sending an identical
+   * status line just grows the context window for no benefit.
+   */
   function sendContext(text: string) {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      const now = Date.now();
-      if (now - lastSendRef.current < HOLD_MS) return; // debounce
-      lastSendRef.current = now;
-      wsRef.current.send(JSON.stringify({ type: 'context', text }));
-    }
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    if (text === lastTextRef.current) return;
+    const now = Date.now();
+    if (now - lastSendRef.current < HOLD_MS) return;
+    lastSendRef.current = now;
+    lastTextRef.current = text;
+    wsRef.current.send(JSON.stringify({ type: 'context', text }));
   }
 
   function disconnect() {

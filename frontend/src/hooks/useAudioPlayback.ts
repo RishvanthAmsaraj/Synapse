@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { VisemeTrack } from '../holo/visemeTrack';
 
 // Gemini Live outputs 24kHz PCM audio
 const OUTPUT_SAMPLE_RATE = 24000;
@@ -21,6 +22,14 @@ export function useAudioPlayback(onLevel?: (level: number) => void) {
   // Track all scheduled sources so flush() can stop them individually
   const sourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const pumpRef = useRef<number | null>(null);
+
+  /**
+   * Viseme track. Every chunk is analysed at the moment it is SCHEDULED,
+   * which is before any of it has been heard — so the face can be driven by
+   * reading the track at the current audio clock position instead of by
+   * reacting to sound that has already played.
+   */
+  const visemeTrackRef = useRef<VisemeTrack>(new VisemeTrack());
 
   // Keep the latest onLevel without recreating the pump
   const onLevelRef = useRef(onLevel);
@@ -105,6 +114,14 @@ export function useAudioPlayback(onLevel?: (level: number) => void) {
     source.start(startAt);
     nextPlayAtRef.current = startAt + audioBuffer.duration;
 
+    // Analyse ahead of playback, stamped to the clock position it will be
+    // heard at. This is what removes the lag from the mouth.
+    try {
+      visemeTrackRef.current.push(float32, OUTPUT_SAMPLE_RATE, startAt);
+    } catch (e) {
+      console.error('[lipsync] analysis failed:', e);
+    }
+
     startPump();
   }
 
@@ -131,6 +148,9 @@ export function useAudioPlayback(onLevel?: (level: number) => void) {
     }
     sourcesRef.current = [];
     nextPlayAtRef.current = ctxRef.current ? ctxRef.current.currentTime : 0;
+    // The queued speech is gone, so the mouth pose for it must go too —
+    // otherwise the face keeps talking after a barge-in.
+    visemeTrackRef.current.clear();
   }
 
   /** Full teardown on session end — closes the AudioContext entirely. */
@@ -147,5 +167,21 @@ export function useAudioPlayback(onLevel?: (level: number) => void) {
     analyserRef.current = null;
   }
 
-  return { playChunk, flush, stop, analyserRef };
+  /**
+   * Build and unlock the audio graph up front.
+   *
+   * getCtx() used to run on the first chunk of the first reply, so
+   * constructing the AudioContext, loading it and resuming from the
+   * suspended state all landed inside the response the user was waiting on.
+   * Doing it at connect time moves that cost somewhere nobody is listening.
+   */
+  async function prime() {
+    const ctx = getCtx();
+    if (ctx.state === 'suspended') {
+      try { await ctx.resume(); } catch { /* resumed on first gesture instead */ }
+    }
+    nextPlayAtRef.current = ctx.currentTime;
+  }
+
+  return { playChunk, flush, stop, prime, analyserRef, visemeTrackRef, audioCtxRef: ctxRef };
 }

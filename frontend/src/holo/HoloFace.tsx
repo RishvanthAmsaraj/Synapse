@@ -1,13 +1,15 @@
-import { useEffect, useRef, type MutableRefObject } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { buildFaceRig, AU_NAMES, type FaceRig } from './faceRig';
-import { LipsyncAnalyser, VISEMES, VISEME_TO_AU, type VisemeFrame } from './lipsync';
+import { buildFaceRig, AU_NAMES, apertureBounds, insideAperture, type FaceRig } from './faceRig';
+import { VISEMES, VISEME_TO_AU, type VisemeFrame } from './lipsync';
+import { emptyVisemeFrame, type VisemeTrack } from './visemeTrack';
 import {
   AUAnimator, BlinkController, GazeController, Breath, EMOTIONS, fbm,
   type Emotion,
 } from './expression';
 import { createHoloMaterial, createEyeMaterial } from './holoMaterial';
+import { gesture } from '../canvas/gesture';
 import './HoloFace.css';
 
 /**
@@ -24,6 +26,33 @@ import './HoloFace.css';
 
 export type HoloLayout = 'hero' | 'docked';
 
+/**
+ * Switch the projection between glowing on a dark page and inking on a light
+ * one. Additive blending adds light, and adding light to white gets you
+ * white — so a light theme needs both a dark palette AND normal blending, or
+ * the face is invisible rather than merely low-contrast.
+ */
+function applyTheme(
+  face: ReturnType<typeof createHoloMaterial>,
+  eye: ReturnType<typeof createEyeMaterial>,
+  theme: 'dark' | 'light',
+) {
+  const css = getComputedStyle(document.documentElement);
+  const pick = (name: string, fallback: string) =>
+    (css.getPropertyValue(name) || '').trim() || fallback;
+  const ink = theme === 'light';
+
+  for (const m of [face, eye]) {
+    m.uniforms.uCore.value.set(pick('--holo-core', ink ? '#0d2044' : '#f2f9ff'));
+    m.uniforms.uMid.value.set(pick('--holo-mid', ink ? '#24508f' : '#86dcff'));
+    m.uniforms.uInk.value = ink ? 1 : 0;
+    m.blending = ink ? THREE.NormalBlending : THREE.AdditiveBlending;
+    m.needsUpdate = true;
+  }
+  face.uniforms.uDeep.value.set(pick('--holo-deep', ink ? '#93a6cf' : '#4b6ee0'));
+  eye.uniforms.uDeep.value.set(pick('--holo-deep', ink ? '#93a6cf' : '#22407f'));
+}
+
 interface HoloFaceProps {
   status: string;
   /** Microphone is open. */
@@ -32,9 +61,21 @@ interface HoloFaceProps {
   layout: HoloLayout;
   /** Element the face flies to. Rendered by the parent in either position. */
   anchorRef: MutableRefObject<HTMLElement | null>;
-  /** Live output AnalyserNode — drives viseme-accurate lip sync. */
-  analyserRef: MutableRefObject<AnalyserNode | null>;
+  /** Viseme track, filled ahead of playback by useAudioPlayback. */
+  visemeTrackRef: MutableRefObject<VisemeTrack>;
+  /** Output AudioContext — its clock is what the track is sampled against. */
+  audioCtxRef: MutableRefObject<AudioContext | null>;
   micPeakRef: MutableRefObject<number>;
+  /**
+   * Widget id the face should be looking at, or null for the viewer.
+   *
+   * This is the deictic channel: when the agent moves between panels, the
+   * head and eyes physically turn toward the one being discussed. It is what
+   * separates a presenter from a UI that happens to be updating.
+   */
+  attentionIdRef?: MutableRefObject<string | null>;
+  /** Light pages need dark dots; see uInk in holoMaterial. */
+  theme?: 'dark' | 'light';
   /** Overrides the automatically derived expression. */
   emotion?: Emotion;
   /** Bumped by the parent to fire the interference burst on barge-in. */
@@ -60,15 +101,39 @@ function pickQuality() {
 }
 
 export function HoloFace({
-  status, listening, layout, anchorRef, analyserRef, micPeakRef,
-  emotion, interruptSignal = 0,
+  status, listening, layout, anchorRef, visemeTrackRef, audioCtxRef, micPeakRef,
+  attentionIdRef, theme = 'dark', emotion, interruptSignal = 0,
 }: HoloFaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Bumped when the browser takes the WebGL context away, which forces the
+   * whole effect to tear down and rebuild. Without this the canvas stayed a
+   * blank white rectangle for the rest of the session — which is exactly what
+   * happened under the load of the old drag implementation.
+   */
+  const [generation, setGeneration] = useState(0);
+
+  /** Live materials, so a theme change can be applied without a rebuild. */
+  const matsRef = useRef<{
+    face: ReturnType<typeof createHoloMaterial>;
+    eye: ReturnType<typeof createEyeMaterial>;
+  } | null>(null);
 
   // Props read inside the animation loop, kept in a ref so the loop never
   // has to be torn down and rebuilt.
   const p = useRef({ status, listening, layout, emotion, interruptSignal });
   p.current = { status, listening, layout, emotion, interruptSignal };
+
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+
+  // Repaint on theme change. Colours come from CSS custom properties, so the
+  // palette lives with the rest of the design tokens rather than in here.
+  useEffect(() => {
+    const m = matsRef.current;
+    if (m) applyTheme(m.face, m.eye, theme);
+  }, [theme]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -89,6 +154,19 @@ export function HoloFace({
     host.style.height = `${q.buffer}px`;
     host.appendChild(renderer.domElement);
 
+    // Losing the context is recoverable, but only if we say so: the default
+    // action makes the loss permanent.
+    const canvasEl = renderer.domElement;
+    let lost = false;
+    const onLost = (e: Event) => {
+      e.preventDefault();
+      lost = true;
+      console.warn('[holoface] WebGL context lost — rebuilding');
+    };
+    const onRestored = () => { setGeneration((g) => g + 1); };
+    canvasEl.addEventListener('webglcontextlost', onLost as EventListener, false);
+    canvasEl.addEventListener('webglcontextrestored', onRestored, false);
+
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 40);
     camera.position.set(0, 0, 3.15);
@@ -101,7 +179,14 @@ export function HoloFace({
     const blink = new BlinkController();
     const gaze = new GazeController();
     const breath = new Breath();
-    const lip = new LipsyncAnalyser(1024, 24000);
+
+    /**
+     * The mouth is driven slightly AHEAD of the sound. Perceptually,
+     * articulation a few tens of milliseconds early still reads as
+     * simultaneous, whereas the same offset in the other direction reads as
+     * badly dubbed — so the asymmetry is worth spending deliberately.
+     */
+    const LIP_LEAD = 0.045;
 
     let rig: FaceRig | null = null;
     let faceGeo: THREE.BufferGeometry | null = null;
@@ -124,6 +209,7 @@ export function HoloFace({
     let speechEnergy = 0;
     let listenGlow = 0;
     let frame: VisemeFrame | null = null;
+    let frameParity = false;
 
     const layoutT: Spring = { x: p.current.layout === 'docked' ? 1 : 0, v: 0 };
     const rectSpring = {
@@ -176,6 +262,9 @@ export function HoloFace({
         pixelRatio: 1,
       });
 
+      matsRef.current = { face: faceMat, eye: eyeMat };
+      applyTheme(faceMat, eyeMat, themeRef.current);
+
       const facePoints = new THREE.Points(faceGeo, faceMat);
       const eyePoints = new THREE.Points(eyeGeo, eyeMat);
       facePoints.frustumCulled = false;
@@ -195,6 +284,16 @@ export function HoloFace({
     // ── Pointer gaze ───────────────────────────────────────────────
     let pointer: [number, number] | null = null;
     let pointerIdle = 0;
+
+    // Cached DOM node for the panel currently holding her attention. Resolved
+    // only when the id changes; its rect is then read per frame, which is one
+    // layout query and lets the gaze track a panel while it is still
+    // animating into place.
+    let attentionId: string | null = null;
+    let attentionEl: HTMLElement | null = null;
+    // Kept alive while she speaks and for a moment after, so she does not
+    // snap back to the viewer between sentences of the same explanation.
+    let deicticHold = 0;
     const onPointerMove = (e: PointerEvent) => {
       pointer = [
         (e.clientX / window.innerWidth) * 2 - 1,
@@ -207,6 +306,22 @@ export function HoloFace({
     // ── Frame ──────────────────────────────────────────────────────
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
+      if (lost) return;
+
+      // A hidden tab should cost nothing. rAF is already throttled there, but
+      // skipping outright avoids doing rig work nobody can see, and resets the
+      // clock on return so the first visible frame is not handed a multi-second
+      // delta to integrate.
+      if (document.hidden) { last = now; return; }
+
+      // While the user is dragging or resizing a panel, the face gives way.
+      // Rebuilding the dot positions costs a pass over ~6000 points times
+      // every active action unit, and competing with a layout gesture for the
+      // main thread is what made both feel broken. It keeps rendering — it
+      // just stops re-solving the rig — so it never freezes or blanks.
+      const busy = gesture.active;
+      if (busy && (frameParity = !frameParity)) return;
+
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
       time += dt;
@@ -252,12 +367,14 @@ export function HoloFace({
         lastInterrupt = p.current.interruptSignal;
         glitch = 0.55;
         blink.trigger();
-        lip.reset();
       }
       glitch = Math.max(0, glitch - dt * 1.6);
 
       // ── Speech ────────────────────────────────────────────────────
-      frame = lip.analyse(analyserRef.current, dt);
+      const actx = audioCtxRef.current;
+      frame = actx && actx.state !== 'closed'
+        ? visemeTrackRef.current.sample(actx.currentTime + LIP_LEAD)
+        : emptyVisemeFrame();
       const speaking = !frame.silent;
       speechEnergy += (frame.energy - speechEnergy) * (1 - Math.exp(-dt / 0.05));
 
@@ -305,16 +422,45 @@ export function HoloFace({
 
       // ── Gaze ──────────────────────────────────────────────────────
       pointerIdle += dt;
-      if (mood === 'thinking') gaze.look('away');
-      else if (lay === 'docked' && speaking) gaze.look('canvas');
+
+      // Where is she looking? In priority order: the panel under discussion,
+      // then the cursor, then the viewer.
+      const wantId = attentionIdRef?.current ?? null;
+      if (wantId !== attentionId) {
+        attentionId = wantId;
+        attentionEl = wantId
+          ? (document.querySelector(`[data-widget-id="${wantId}"]`) as HTMLElement | null)
+          : null;
+      }
+
+      if (speaking) deicticHold = 1.4;
+      else deicticHold = Math.max(0, deicticHold - dt);
+
+      let deictic: [number, number] | null = null;
+      if (attentionEl && lay === 'docked' && deicticHold > 0) {
+        const r = attentionEl.getBoundingClientRect();
+        if (r.width > 0) {
+          // Direction from the head's own position on screen to the panel,
+          // normalised against the viewport so the angle stays sane on any
+          // window size.
+          const dx = (r.left + r.width / 2 - rectSpring.x.x) / (window.innerWidth / 2);
+          const dy = -(r.top + r.height / 2 - rectSpring.y.x) / (window.innerHeight / 2);
+          deictic = [Math.max(-1, Math.min(1, dx)), Math.max(-1, Math.min(1, dy))];
+        }
+      }
+
+      if (mood === 'thinking' && !deictic) gaze.look('away');
+      else if (deictic) gaze.look('canvas');
       else gaze.look('viewer');
-      gaze.point = pointer && pointerIdle < 2.5 && lay === 'hero' ? pointer : null;
+
+      gaze.point = deictic
+        ?? (pointer && pointerIdle < 2.5 && lay === 'hero' ? pointer : null);
       gaze.update(dt);
 
       breath.update(dt, speechEnergy);
 
       // ── Apply the rig ─────────────────────────────────────────────
-      if (rig && facePos && faceGeo) {
+      if (rig && facePos && faceGeo && !busy) {
         facePos.set(rig.base);
         for (const name of AU_NAMES) {
           const w = anim.current[name];
@@ -331,15 +477,39 @@ export function HoloFace({
         (faceGeo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
       }
 
-      // ── Eyes: gaze rotation + lid occlusion ───────────────────────
-      if (rig && eyePos && eyeGeo && eyeAlpha) {
+      // ── Eyes: globe rotates for gaze, lids do not ─────────────────
+      if (rig && eyePos && eyeGeo && eyeAlpha && !busy) {
         const gx = gaze.x, gy = gaze.y;
         const cy = Math.cos(gy), sy = Math.sin(gy);
         const cx = Math.cos(gx), sx = Math.sin(gx);
         const base = rig.eye.base;
+        const R = rig.eye.radius;
         for (let i = 0; i < rig.eye.count; i++) {
           const o = i * 3;
-          const c = rig.eye.side[i] === 0 ? rig.eye.centerL : rig.eye.centerR;
+          const pt = rig.eye.part[i];
+          const sideIdx = rig.eye.side[i];
+          const c = sideIdx === 0 ? rig.eye.centerL : rig.eye.centerR;
+          // u is signed so positive always points at the OUTER corner.
+          const outward = sideIdx === 0 ? 1 : -1;
+          const b = sideIdx === 0 ? blink.left : blink.right;
+
+          if (pt >= 3) {
+            // Lash line. Eyelids belong to the face, not the eyeball, so
+            // these are rebuilt from the aperture curve each frame and never
+            // see the gaze rotation — the eye moves underneath them.
+            const u = rig.eye.apertureU[i];
+            const bounds = apertureBounds(u, pt === 3 ? b : 0);
+            const v = pt === 3 ? bounds[1] : bounds[0];
+            const lx = u * outward * R;
+            const ly = v * R;
+            const lz = Math.sqrt(Math.max(0, R * R - lx * lx - ly * ly)) - R * 0.16;
+            eyePos[o] = c[0] + lx;
+            eyePos[o + 1] = c[1] + ly;
+            eyePos[o + 2] = c[2] + lz;
+            eyeAlpha[i] = 1;
+            continue;
+          }
+
           const lx0 = base[o] - c[0], ly0 = base[o + 1] - c[1], lz0 = base[o + 2] - c[2];
           const y1 = ly0 * cy - lz0 * sy, z1 = ly0 * sy + lz0 * cy;
           const x2 = lx0 * cx + z1 * sx, z2 = -lx0 * sx + z1 * cx;
@@ -347,12 +517,9 @@ export function HoloFace({
           eyePos[o + 1] = c[1] + y1;
           eyePos[o + 2] = c[2] + z2;
 
-          // The lid is a hard horizontal edge sweeping down over the globe;
-          // dots above it stop being drawn. Fading the whole eye instead
-          // reads as the eye dimming, not as a blink.
-          const b = rig.eye.side[i] === 0 ? blink.left : blink.right;
-          const lidY = rig.eye.radius * (1 - 2.15 * b);
-          eyeAlpha[i] = y1 < lidY ? 1 : 0;
+          // The almond shape and the blink are the same mask: whatever the
+          // lids do not leave open simply is not drawn.
+          eyeAlpha[i] = insideAperture((x2 / R) * outward, y1 / R, b) ? 1 : 0;
         }
         (eyeGeo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
         (eyeGeo.getAttribute('aAlpha') as THREE.BufferAttribute).needsUpdate = true;
@@ -403,7 +570,9 @@ export function HoloFace({
         m.uniforms.uGlitch.value = glitch;
         m.uniforms.uScanY.value = scanY;
         m.uniforms.uScanGain.value = scanActive * 0.9;
-        m.uniforms.uOpacity.value = dim * (0.55 + 0.45 * materialize);
+        // Ink needs slightly less weight than glow to read the same.
+        const inkTrim = themeRef.current === 'light' ? 0.9 : 1;
+        m.uniforms.uOpacity.value = dim * (0.55 + 0.45 * materialize) * inkTrim;
       }
       if (faceMat) {
         // Docked, the head is small on screen, so the dots need to be a
@@ -417,6 +586,8 @@ export function HoloFace({
 
     return () => {
       cancelAnimationFrame(raf);
+      canvasEl.removeEventListener('webglcontextlost', onLost as EventListener);
+      canvasEl.removeEventListener('webglcontextrestored', onRestored);
       window.removeEventListener('pointermove', onPointerMove);
       faceGeo?.dispose();
       eyeGeo?.dispose();
@@ -427,8 +598,10 @@ export function HoloFace({
     };
     // Intentionally empty: the loop reads live values through refs so the
     // WebGL context survives every re-render and every layout change.
+    // Rebuilds only when the GPU context is lost; live values reach the loop
+    // through refs, so ordinary re-renders never touch it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [generation]);
 
   return (
     <div className="holo-layer" aria-hidden="true">

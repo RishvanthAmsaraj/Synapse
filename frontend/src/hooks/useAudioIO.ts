@@ -27,7 +27,19 @@ export function useAudioIO(
   async function start() {
     if (isRecording) return;
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    // Echo cancellation is the reason barge-in can be aggressive. On speakers
+    // the agent's own voice returns through the microphone and reads as the
+    // user talking, which is what previously forced start-of-speech
+    // sensitivity down and made the agent almost impossible to interrupt.
+    // AEC removes the echo at the source, so the VAD can stay responsive.
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
     streamRef.current = stream;
 
     const ctx = new AudioContext({ sampleRate: INPUT_SAMPLE_RATE });

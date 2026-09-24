@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
-import { CodeViewer } from './CodeViewer';
+import { MemoCodeViewer as CodeViewer } from './CodeViewer';
+import { MemoActivityWidget as ActivityWidget } from './ActivityWidget';
 import { CallStack } from './CallStack';
 import { ImageWidget } from './ImageWidget';
 import { TextWidget } from './TextWidget';
@@ -26,6 +27,7 @@ export interface WidgetDefinition {
 
 export const WIDGET_REGISTRY: Record<string, WidgetDefinition> = {
   code_viewer: { type: 'code_viewer', component: CodeViewer, defaultCols: 2, defaultRows: 2 },
+  activity: { type: 'activity', component: ActivityWidget, defaultCols: 3, defaultRows: 6 },
   call_stack: { type: 'call_stack', component: CallStack, defaultCols: 1, defaultRows: 2 },
   image: { type: 'image', component: ImageWidget, defaultCols: 1, defaultRows: 1 },
   text: { type: 'text', component: TextWidget, defaultCols: 2, defaultRows: 2 },

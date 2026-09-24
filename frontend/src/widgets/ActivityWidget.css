@@ -1,0 +1,120 @@
+.activity {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 14px 16px;
+  box-sizing: border-box;
+  font-family: var(--font-sans);
+}
+
+.activity-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 9px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.activity-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.activity-count {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  background: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.activity-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.activity-row {
+  display: flex;
+  gap: 9px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  animation: activity-in 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.activity-row:last-child { border-bottom: 0; }
+
+@keyframes activity-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.activity-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+/* A running step pulses; everything else is static, so motion on this panel
+   always means "something is happening right now". */
+.is-running .activity-dot {
+  background: var(--accent);
+  animation: activity-pulse 1.15s ease-in-out infinite;
+}
+.is-done .activity-dot  { background: #43c98b; }
+.is-error .activity-dot { background: #e56b6b; }
+
+@keyframes activity-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.78); }
+}
+
+.activity-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+
+.activity-label {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.activity-detail {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-url {
+  font-size: 11.5px;
+  color: var(--accent);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-url:hover { text-decoration: underline; }
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-row { animation: none; }
+  .is-running .activity-dot { animation: none; }
+}

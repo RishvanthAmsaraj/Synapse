@@ -12,7 +12,9 @@ import type { CallStackData } from './widgets/CallStack';
 import type { ImageWidgetData } from './widgets/ImageWidget';
 import type { TextWidgetData } from './widgets/TextWidget';
 import type { TerminalWidgetData, ExecBlock } from './widgets/TerminalWidget';
+import type { ActivityEntry, ActivityWidgetData } from './widgets/ActivityWidget';
 import { HoloFace } from './holo/HoloFace';
+import { VoiceWave } from './components/VoiceWave';
 import './App.css';
 
 // Staggered highlight timing: first fires after a short pause,
@@ -32,19 +34,45 @@ export default function App() {
 }
 
 function AppInner() {
-  const { addWidget, removeWidget, updateWidget, focusWidget, clearWidgets, getInventoryString, widgets } = useCanvas();
+  const { addWidget, removeWidget, updateWidget, focusWidget, resizeWidget, clearWidgets, getInventoryString, widgets, focusedId } = useCanvas();
   // Live audio levels — mic drives "listening" liveliness; TTS playback
   // drives the face's mouth (lip sync).
   const micPeakRef = useRef<number>(0);
+  /**
+   * Mic level for the waveform. Separate from micPeakRef because HoloFace
+   * consumes that one destructively (peak-and-clear each frame), so a second
+   * reader would mostly see zeroes.
+   */
+  const micLevelRef = useRef<number>(0);
   const ttsPeakRef = useRef<number>(0);
 
   // The face is mounted once, outside the layout branches, and flies to
   // whichever anchor is currently on screen. Keeping one WebGL context alive
   // for the whole session is what makes the hero/dock move continuous.
   const holoAnchorRef = useRef<HTMLElement | null>(null);
+  // The panel the face should be looking at. Mirrored into a ref because the
+  // render loop reads it every frame and must not re-subscribe to do so.
+  const attentionIdRef = useRef<string | null>(null);
+  const sendContextRef = useRef<((text: string) => void) | null>(null);
+  // Current widget list, readable from the tool handler without making it a
+  // dependency and tearing down the callback on every canvas change.
+  const widgetsRef = useRef(widgets);
+  useEffect(() => { widgetsRef.current = widgets; }, [widgets]);
+  useEffect(() => { attentionIdRef.current = focusedId; }, [focusedId]);
   const [interruptSignal, setInterruptSignal] = useState(0);
 
-  const { playChunk, flush, stop, analyserRef } = useAudioPlayback(
+  // Persona is chosen before connecting. The list comes from the server so it
+  // cannot drift out of sync with personas.ts.
+  const [personas, setPersonas] = useState<Array<{ id: string; label: string }>>([]);
+  const [personaId, setPersonaId] = useState<string>('companion');
+  useEffect(() => {
+    fetch('/api/personas')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => { if (Array.isArray(list) && list.length) setPersonas(list); })
+      .catch(() => { /* selector just stays hidden */ });
+  }, []);
+
+  const { playChunk, flush, stop, prime, visemeTrackRef, audioCtxRef } = useAudioPlayback(
     useCallback((level: number) => {
       ttsPeakRef.current = Math.max(ttsPeakRef.current, level);
     }, [])
@@ -59,12 +87,27 @@ function AppInner() {
   }, []);
 
   // Track the active code viewer widget so highlight can update it
-  const codeViewerIdRef   = useRef<string | null>(null);
-  const codeViewerDataRef = useRef<CodeViewerData>({ language: '', code: '' });
+  /**
+   * Panel registry — the canvas holds many panels, addressed by slug.
+   *
+   * Each widget type used to keep ONE id in a ref, so a second image_show
+   * overwrote the first and the canvas could never hold more than one picture,
+   * one text block and one code block. Panels are now keyed by
+   * `${type}:${slug}`: a new slug opens a panel, a repeated slug replaces that
+   * panel in place, and the model decides which it means by what it names.
+   */
+  const panelsRef = useRef<Map<string, { id: string; type: string; slug: string }>>(new Map());
+  const codeDataRef = useRef<Map<string, CodeViewerData>>(new Map());
+  /** Append-only activity feeds, keyed by panel slug. */
+  const activityRef = useRef<Map<string, ActivityEntry[]>>(new Map());
+  const activityCounterRef = useRef(1);
+
+  const panelKey = (type: string, slug: unknown) =>
+    `${type}:${(typeof slug === 'string' && slug.trim()) || 'main'}`;
 
   // Staggered highlight state
   const pendingTimersRef        = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const pendingHighlightCountRef = useRef(0);
+  const pendingHighlightCountRef = useRef<Map<string, number>>(new Map());
   const highlightsClearedRef = useRef(false);
 
   // Always-current canvas inventory for turn_complete injection
@@ -72,10 +115,10 @@ function AppInner() {
   useEffect(() => { inventoryRef.current = getInventoryString; }, [getInventoryString]);
 
   // Track the active text widget ID so we replace rather than stack
-  const textWidgetIdRef = useRef<string | null>(null);
+
 
   // Track the active image widget ID so we replace rather than stack
-  const imageWidgetIdRef = useRef<string | null>(null);
+
 
   // Track the active call stack widget ID so push/pop/overflow can mutate it
   const callStackIdRef   = useRef<string | null>(null);
@@ -115,11 +158,36 @@ function AppInner() {
     return () => { sppe.dispose(); };
   }, [addLog]);
 
-  // Cancel all pending highlight timers and reset the counter.
+  /** Open the panel if its slug is new; otherwise replace it in place. */
+  function upsertPanel(
+    type: string, slug: string, data: unknown, cols: number, rows: number, source?: string,
+  ): string {
+    const key = panelKey(type, slug);
+    const existing = panelsRef.current.get(key);
+    if (existing) {
+      updateWidget(existing.id, data);
+      return existing.id;
+    }
+    const id = addWidget(type, data, cols, rows, source);
+    panelsRef.current.set(key, { id, type, slug });
+    return id;
+  }
+
+  /**
+   * What the model is told is on screen. Reporting slugs rather than bare
+   * types is what lets it reuse a panel deliberately, close the right one,
+   * and know how many are already open.
+   */
+  function panelInventory(): string {
+    const entries = [...panelsRef.current.values()].map((e) => `${e.type}:${e.slug}`);
+    return entries.length ? entries.join(', ') : 'empty';
+  }
+
+  // Cancel all pending highlight timers and reset the counters.
   function clearPendingHighlights() {
     for (const t of pendingTimersRef.current) clearTimeout(t);
     pendingTimersRef.current = [];
-    pendingHighlightCountRef.current = 0;
+    pendingHighlightCountRef.current.clear();
   }
 
   const handleToolCall = useCallback(
@@ -166,41 +234,44 @@ function AppInner() {
 
         // ── Code Viewer ──────────────────────────────────────────────
         case 'code_viewer_show': {
-          const { language, code } = call.args as { language: string; code: string };
+          const { panel, language, code, agent } = call.args as
+            { panel?: string; language: string; code: string; agent?: string };
+          const slug = (panel && panel.trim()) || 'main';
           clearPendingHighlights();
           highlightsClearedRef.current = false;
           const normalizedCode = code.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
           const data: CodeViewerData = { language, code: normalizedCode };
-          codeViewerDataRef.current = data;
-          if (codeViewerIdRef.current) {
-            updateWidget(codeViewerIdRef.current, data);
-          } else {
-            const id = addWidget('code_viewer', data, 2, 2);
-            codeViewerIdRef.current = id;
-          }
-          if (codeViewerIdRef.current) focusWidget(codeViewerIdRef.current);
+          codeDataRef.current.set(slug, data);
+          focusWidget(upsertPanel('code_viewer', slug, data, 6, 6, agent));
           break;
         }
 
         case 'code_viewer_next_highlight': {
-          if (!codeViewerIdRef.current) break;
-          focusWidget(codeViewerIdRef.current);
-          const { start_line, end_line } = call.args as { start_line: number; end_line: number };
+          const { panel, start_line, end_line } = call.args as
+            { panel?: string; start_line: number; end_line: number };
+          const slug = (panel && panel.trim()) || 'main';
+          const entry = panelsRef.current.get(panelKey('code_viewer', slug));
+          if (!entry) break;
+          focusWidget(entry.id);
           if (!start_line || !end_line || start_line <= 0 || end_line <= 0) break;
           highlightsClearedRef.current = false;
 
-          const delay = HIGHLIGHT_INITIAL_DELAY + pendingHighlightCountRef.current * HIGHLIGHT_INTERVAL;
-          pendingHighlightCountRef.current += 1;
+          // Each code panel walks through its own sections on its own clock,
+          // so the counter is per-panel rather than global.
+          const seen = pendingHighlightCountRef.current.get(slug) ?? 0;
+          pendingHighlightCountRef.current.set(slug, seen + 1);
+          const delay = HIGHLIGHT_INITIAL_DELAY + seen * HIGHLIGHT_INTERVAL;
 
           const timerId = setTimeout(() => {
             pendingTimersRef.current = pendingTimersRef.current.filter((t) => t !== timerId);
-            if (!codeViewerIdRef.current) return;
+            const live = panelsRef.current.get(panelKey('code_viewer', slug));
+            if (!live) return;
             const updated: CodeViewerData = {
-              ...codeViewerDataRef.current,
+              ...(codeDataRef.current.get(slug) ?? { language: '', code: '' }),
               highlight: { start: start_line, end: end_line },
             };
-            codeViewerDataRef.current = updated;
-            updateWidget(codeViewerIdRef.current, updated);
+            codeDataRef.current.set(slug, updated);
+            updateWidget(live.id, updated);
           }, delay);
 
           pendingTimersRef.current.push(timerId);
@@ -209,34 +280,88 @@ function AppInner() {
 
         // ── Image ────────────────────────────────────────────────────
         case 'image_show': {
-          const { query, urls } = call.args as { query: string; urls: string[] };
-          // Always reflect the latest request — even a failed lookup gets
-          // shown as a "not found" tile so the user never stares at a stale
-          // picture the agent claims to have replaced.
+          const { panel, query, urls, agent } = call.args as
+            { panel?: string; query: string; urls?: string[]; agent?: string };
+          const slug = (panel && panel.trim()) || 'main';
+          // A failed lookup still gets a tile, so the user never stares at a
+          // stale picture the agent believes it replaced.
           const data: ImageWidgetData = { query, urls: urls ?? [] };
-          if (imageWidgetIdRef.current) {
-            updateWidget(imageWidgetIdRef.current, data);
-          } else {
-            const id = addWidget('image', data, 1, 1);
-            imageWidgetIdRef.current = id;
-          }
-          if (imageWidgetIdRef.current) focusWidget(imageWidgetIdRef.current);
+          focusWidget(upsertPanel('image', slug, data, 4, 4, agent));
           break;
         }
 
         // ── Text ─────────────────────────────────────────────────────
         case 'text_show': {
-          const { content } = call.args as { content: string };
-          const data: TextWidgetData = { content };
-          // Replace in place: one text panel that always shows the latest
-          // key points — the canvas never accumulates stale text tiles.
-          if (textWidgetIdRef.current) {
-            updateWidget(textWidgetIdRef.current, data);
-          } else {
-            const id = addWidget('text', data, 2, 2);
-            textWidgetIdRef.current = id;
+          const { panel, title, content, agent } = call.args as
+            { panel?: string; title?: string; content: string; agent?: string };
+          const slug = (panel && panel.trim()) || 'main';
+          const data: TextWidgetData = { content, title, panel: slug };
+          focusWidget(upsertPanel('text', slug, data, 4, 4, agent));
+          break;
+        }
+
+        case 'activity_log': {
+          const { panel, label, detail, url, status, agent } = call.args as {
+            panel?: string; label: string; detail?: string; url?: string;
+            status?: string; agent?: string;
+          };
+          const slug = (panel && panel.trim()) || 'activity';
+          const key = panelKey('activity', slug);
+          const prev = activityRef.current.get(slug) ?? [];
+          const state = (status === 'running' || status === 'error') ? status : 'done';
+
+          // A step that reports back with the same label updates in place, so
+          // "running" becomes "done" rather than appearing twice.
+          const existing = prev.findIndex((e) => e.label === label && e.status === 'running');
+          const entry = {
+            id: existing >= 0 ? prev[existing].id : `act_${activityCounterRef.current++}`,
+            label, detail, url, status: state as 'running' | 'done' | 'error', at: Date.now(),
+          };
+          const next = existing >= 0
+            ? prev.map((e, i) => (i === existing ? entry : e))
+            : [...prev, entry].slice(-60);
+
+          activityRef.current.set(slug, next);
+          const data: ActivityWidgetData = { title: agent ?? 'Activity', entries: next };
+          const live = panelsRef.current.get(key);
+          if (live) updateWidget(live.id, data);
+          else upsertPanel('activity', slug, data, 3, 6, agent);
+          break;
+        }
+
+        // ── Panel management ─────────────────────────────────────────
+        case 'close_panel': {
+          const { panel } = call.args as { panel?: string };
+          const slug = (panel && panel.trim()) || 'main';
+          for (const [key, entry] of [...panelsRef.current.entries()]) {
+            if (entry.slug !== slug) continue;
+            removeWidget(entry.id);
+            panelsRef.current.delete(key);
+            codeDataRef.current.delete(slug);
+            activityRef.current.delete(slug);
           }
-          if (textWidgetIdRef.current) focusWidget(textWidgetIdRef.current);
+          break;
+        }
+
+        case 'arrange_panel': {
+          const { panel, cols, rows } = call.args as
+            { panel?: string; cols?: number; rows?: number };
+          const slug = (panel && panel.trim()) || 'main';
+          for (const entry of panelsRef.current.values()) {
+            if (entry.slug !== slug) continue;
+            const w = widgetsRef.current.find((x) => x.id === entry.id);
+            resizeWidget(entry.id, cols ?? w?.cols ?? 4, rows ?? w?.rows ?? 2);
+            break;
+          }
+          break;
+        }
+
+        case 'focus_panel': {
+          const { panel } = call.args as { panel?: string };
+          const slug = (panel && panel.trim()) || 'main';
+          for (const entry of panelsRef.current.values()) {
+            if (entry.slug === slug) { focusWidget(entry.id); break; }
+          }
           break;
         }
 
@@ -244,7 +369,7 @@ function AppInner() {
         case 'call_stack_show': {
           const initial: CallStackData = { frames: [], overflow: false };
           callStackDataRef.current = initial;
-          const id = addWidget('call_stack', initial, 1, 2);
+          const id = addWidget('call_stack', initial, 3, 6);
           callStackIdRef.current = id;
           focusWidget(id);
           break;
@@ -332,7 +457,7 @@ function AppInner() {
           if (execTerminalIdRef.current) {
             updateWidget(execTerminalIdRef.current, data);
           } else {
-            const id = addWidget('terminal', data, 2, 2);
+            const id = addWidget('terminal', data, 6, 4);
             execTerminalIdRef.current = id;
             focusWidget(id);
           }
@@ -353,10 +478,9 @@ function AppInner() {
         case 'clear_canvas': {
           clearPendingHighlights();
           clearWidgets();
-          codeViewerIdRef.current = null;
-          codeViewerDataRef.current = { language: '', code: '' };
-          textWidgetIdRef.current = null;
-          imageWidgetIdRef.current = null;
+          panelsRef.current.clear();
+          codeDataRef.current.clear();
+          activityRef.current.clear();
           callStackIdRef.current = null;
           callStackDataRef.current = { frames: [], overflow: false };
           frameCounterRef.current = 0;
@@ -367,8 +491,32 @@ function AppInner() {
         }
       }
     },
-    [addWidget, removeWidget, updateWidget, focusWidget, clearWidgets, addLog]
+    [addWidget, removeWidget, updateWidget, focusWidget, resizeWidget, clearWidgets, addLog]
   );
+
+  // The user editing a panel is new information the agent needs. It arrives
+  // as silent context, so it informs the next answer without provoking one.
+  useEffect(() => {
+    const onEdit = (e: Event) => {
+      const { panel, content } = (e as CustomEvent).detail as { panel: string; content: string };
+      addLog(`panel edited by user → ${panel}`);
+
+      // Persist it. Without this the panel snaps back to whatever the agent
+      // last wrote the moment anything re-renders.
+      const entry = panelsRef.current.get(`text:${panel}`);
+      if (entry) {
+        const prev = widgetsRef.current.find((w) => w.id === entry.id)?.data as
+          | { title?: string } | undefined;
+        updateWidget(entry.id, { content, title: prev?.title, panel });
+      }
+
+      sendContextRef.current?.(
+        `[user edited panel "${panel}". Its contents are now:\n${content}\nTreat this as the current truth for that panel.]`
+      );
+    };
+    window.addEventListener('synapse:panel-edit', onEdit);
+    return () => window.removeEventListener('synapse:panel-edit', onEdit);
+  }, [addLog, updateWidget]);
 
   const { connect, disconnect, sendAudio, sendContext, status } = useLiveSession({
     onAudioChunk: (base64) => playChunk(base64),
@@ -382,25 +530,27 @@ function AppInner() {
       const sppe = sppeRef.current;
       if (sppe) {
         sppe.handleInterrupt();
-        // Check if code viewer needs rollback
-        if (codeViewerIdRef.current) {
-          const cleared: CodeViewerData = {
-            language: codeViewerDataRef.current.language,
-            code: codeViewerDataRef.current.code,
-          };
-          codeViewerDataRef.current = cleared;
-          updateWidget(codeViewerIdRef.current, cleared);
+        // Drop highlights on every open code panel — an interruption
+        // invalidates the walkthrough wherever it was running.
+        for (const entry of panelsRef.current.values()) {
+          if (entry.type !== 'code_viewer') continue;
+          const prev = codeDataRef.current.get(entry.slug);
+          if (!prev) continue;
+          const cleared: CodeViewerData = { language: prev.language, code: prev.code };
+          codeDataRef.current.set(entry.slug, cleared);
+          updateWidget(entry.id, cleared);
           highlightsClearedRef.current = true;
         }
       }
     },
     onToolCall: handleToolCall,
     onTurnComplete: () => {
-      const inv = inventoryRef.current();
+      const inv = panelInventory();
       const sppe = sppeRef.current;
       const depInfo = sppe ? ` | sppe:${sppe.getStatus()}` : '';
-      const note = highlightsClearedRef.current && codeViewerIdRef.current
-        ? ' | highlights cleared — re-call code_viewer_next_highlight for each section on your next turn'
+      const hasCode = [...panelsRef.current.values()].some((e) => e.type === 'code_viewer');
+      const note = highlightsClearedRef.current && hasCode
+        ? ' | highlights cleared by interruption'
         : '';
       if (note) highlightsClearedRef.current = false;
       addLog(`turn_complete → canvas:${inv || 'empty'}${note}${depInfo}`);
@@ -412,6 +562,7 @@ function AppInner() {
     useCallback((chunk: string) => sendAudio(chunk), [sendAudio]),
     useCallback((level: number) => {
       micPeakRef.current = Math.max(micPeakRef.current, level);
+      micLevelRef.current = level;
     }, [])
   );
 
@@ -424,9 +575,12 @@ function AppInner() {
     }
   }, [status, addLog]);
 
+  useEffect(() => { sendContextRef.current = sendContext; }, [sendContext]);
+
   async function handleStart() {
     try {
-      await connect();
+      await prime();
+      await connect(personaId);
       await startMic();
     } catch (err) {
       console.error('Failed to start session:', err);
@@ -444,10 +598,9 @@ function AppInner() {
     clearWidgets();
     clearPendingHighlights();
     highlightsClearedRef.current = false;
-    codeViewerIdRef.current = null;
-    codeViewerDataRef.current = { language: '', code: '' };
-    textWidgetIdRef.current = null;
-    imageWidgetIdRef.current = null;
+    panelsRef.current.clear();
+    codeDataRef.current.clear();
+    activityRef.current.clear();
     callStackIdRef.current = null;
     callStackDataRef.current = { frames: [], overflow: false };
     frameCounterRef.current = 0;
@@ -470,10 +623,13 @@ function AppInner() {
 
   const hasWidgets = widgets.length > 0;
   const statusEl = (
-    <p className="hero-status">
-      <span className={`live-dot live-${status}${isRecording && status === 'connected' ? ' live-recording' : ''}`} />
-      {statusLabel(status, isRecording)}
-    </p>
+    <div className="hero-status">
+      <VoiceWave
+        levelRef={micLevelRef}
+        active={isRecording && status === 'connected'}
+        connected={status === 'connected'}
+      />
+    </div>
   );
   const sessionControls = (
     <>
@@ -489,6 +645,20 @@ function AppInner() {
       <header className="app-header">
         <span className="brand-name">Synapse</span>
         <div className="app-toolbar">
+          {personas.length > 1 && (
+            <label className="persona-select" title="Identity, voice and teaching style">
+              <span className="sr-only">Persona</span>
+              <select
+                value={personaId}
+                disabled={status !== 'disconnected'}
+                onChange={(e) => setPersonaId(e.target.value)}
+              >
+                {personas.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <button className="toolbar-btn" type="button" onClick={toggleTheme}>{darkMode ? 'Light' : 'Dark'}</button>
         </div>
       </header>
@@ -530,7 +700,10 @@ function AppInner() {
         listening={isRecording}
         layout={hasWidgets ? 'docked' : 'hero'}
         anchorRef={holoAnchorRef}
-        analyserRef={analyserRef}
+        attentionIdRef={attentionIdRef}
+        theme={darkMode ? 'dark' : 'light'}
+        visemeTrackRef={visemeTrackRef}
+        audioCtxRef={audioCtxRef}
         micPeakRef={micPeakRef}
         interruptSignal={interruptSignal}
       />
@@ -540,12 +713,6 @@ function AppInner() {
   );
 }
 
-function statusLabel(status: string, isRecording: boolean): string {
-  if (status === 'connecting') return 'Connecting…';
-  if (status === 'connected' && isRecording) return 'Listening';
-  if (status === 'connected') return 'Connected';
-  return 'Disconnected';
-}
 
 function DebugPanel({ logs, events, frontiers, conflicts }:
   { logs: string[]; events: SPPEStreamEvent[]; frontiers: Record<string, number>; conflicts: Array<{ actionId: string; won: boolean; timestamp: number }>; }) {

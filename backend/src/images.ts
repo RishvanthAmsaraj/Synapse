@@ -11,11 +11,17 @@
 // Successful lookups are cached so repeat queries are instant and
 // rate-limiter-friendly. Failed lookups are NOT cached (a retry with a
 // slightly different query may succeed). Maps query → candidate URLs.
+/**
+ * Filename patterns that are almost never what someone meant by "show me X".
+ * Commons is full of these and they otherwise rank highly on a title match.
+ */
+const REJECT = /(coat[_ ]of[_ ]arms|\bflag\b|\bseal\b|\blogo\b|\bicon\b|wikimedia|wikipedia|commons-logo|\bmap\b|locator|location|\bblank\b|\bstub\b|question[_ ]book|edit-|ambox|symbol|disambig|nuvola|crystal[_ ]clear)/i;
+
 const imageCache = new Map<string, string[]>();
 
 // Cap on how many distinct candidate URLs we hand back per query. Enough to
 // survive a dead link or two without flooding the canvas or the network.
-const MAX_CANDIDATES = 5;
+const MAX_CANDIDATES = 8;
 
 // Wikipedia asks for a descriptive User-Agent; a generic one gets throttled
 // after a handful of requests (the "stuck on one picture" symptom). A proper
@@ -26,7 +32,7 @@ const UA_HEADERS = {
 };
 
 /** Fetch a URL with a timeout (AbortController). Returns null on any failure. */
-async function fetchJsonWithTimeout(url: string, timeoutMs = 8000): Promise<any | null> {
+async function fetchJsonWithTimeout(url: string, timeoutMs = 3500): Promise<any | null> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -114,17 +120,52 @@ async function searchImages(candidate: string): Promise<string[]> {
   );
   push(summary?.originalimage?.source ?? summary?.thumbnail?.source);
 
-  // Wikimedia Commons — collect ALL matching images, not just the first.
+  // Wikimedia Commons.
+  //
+  // Raw search order here is poor: it happily returns coats of arms, logos,
+  // icon sets and location maps for almost any subject, and it does not
+  // prefer large files. So we ask for dimensions, drop anything small or
+  // obviously not a picture of the thing, and rank what is left by how well
+  // the filename matches what was asked for.
   const commons = await fetchJsonWithTimeout(
-    `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(candidate)}&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url&iiurlwidth=1600&format=json`
+    `https://commons.wikimedia.org/w/api.php?action=query&generator=search` +
+    `&gsrsearch=${encodeURIComponent(candidate)}&gsrnamespace=6&gsrlimit=24` +
+    `&prop=imageinfo&iiprop=url|size|mime&iiurlwidth=2000&format=json`
   );
   if (commons?.query?.pages) {
     const pages = Object.values(commons.query.pages) as any[];
-    for (const page of pages) {
-      const info = page?.imageinfo?.[0];
-      const url = (info?.thumburl || info?.url) as string | undefined;
-      if (url && /\.(jpe?g|png|svg|gif|webp)$/i.test(url)) push(url);
-    }
+    const terms = candidate.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+
+    const scored = pages
+      .map((page) => {
+        const info = page?.imageinfo?.[0];
+        const url = (info?.thumburl || info?.url) as string | undefined;
+        if (!url) return null;
+        const title = String(page?.title ?? '').toLowerCase();
+        const width = Number(info?.thumbwidth || info?.width || 0);
+        const height = Number(info?.thumbheight || info?.height || 0);
+        const mime = String(info?.mime ?? '');
+
+        if (!/\.(jpe?g|png|svg|gif|webp)$/i.test(url)) return null;
+        // Small files are thumbnails of something else, or icons.
+        if (width && width < 480) return null;
+        // Extreme aspect ratios are banners, timelines and scale bars.
+        if (width && height && (width / height > 4 || height / width > 4)) return null;
+        if (REJECT.test(title)) return null;
+
+        let score = 0;
+        for (const t of terms) if (title.includes(t)) score += 3;
+        // Photographs beat vector art for "show me an X"; diagrams still win
+        // on filename match, which is how a wanted schematic gets through.
+        if (mime.startsWith('image/svg')) score -= 2;
+        if (width >= 1200) score += 2;
+        else if (width >= 800) score += 1;
+        return { url, score };
+      })
+      .filter((x): x is { url: string; score: number } => x !== null)
+      .sort((a, b) => b.score - a.score);
+
+    for (const { url } of scored) push(url);
   }
 
   // Fallback: opensearch for the best matching article titles.
@@ -152,6 +193,20 @@ async function searchImages(candidate: string): Promise<string[]> {
  * ladder). Returns [] only when every rung misses.
  */
 export async function fetchWikipediaImages(query: string): Promise<string[]> {
+  // Hard ceiling on the whole lookup.
+  //
+  // The query ladder can make a dozen requests, and a compound turn fires
+  // several lookups at once. Individually each was bounded; collectively they
+  // could hold a tool response open long enough that the model appeared to
+  // freeze mid-request — which is what "it just didn't respond to the long
+  // one" looked like. Whatever has been found by the deadline is good enough.
+  return Promise.race([
+    collectImages(query),
+    new Promise<string[]>((resolve) => setTimeout(() => resolve([]), 4500)),
+  ]);
+}
+
+async function collectImages(query: string): Promise<string[]> {
   const ladder = buildQueryLadder(query);
   const collected: string[] = [];
   const seen = new Set<string>();

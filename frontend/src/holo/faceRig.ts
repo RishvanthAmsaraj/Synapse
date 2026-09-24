@@ -74,6 +74,85 @@ export function jawlineY(z: number): number {
 /** Depth of the dissolve below the jawline. The head fades out; it is not cut. */
 const JAW_FADE = 0.046;
 
+/**
+ * The palpebral fissure — the almond opening between the eyelids.
+ *
+ * The eyeball is a sphere, so sampling a circular cap of it gives a circular
+ * eye, which is what made the face read as owlish. Real eyes are round
+ * underneath and almond on the surface: what you see is the aperture the lids
+ * leave, roughly two and a half times wider than it is tall, pointed at both
+ * corners, with the outer corner sitting a little higher than the inner one.
+ *
+ * So the globe stays spherical (gaze rotation depends on that) and the shape
+ * comes from masking it against this curve every frame. Blinking is the same
+ * mask with the upper lid driven down, which means one piece of geometry
+ * gives both the eye shape and the blink.
+ */
+export const APERTURE = {
+  halfWidth: 0.96, // eyeball radii
+  upper: 0.350,
+  lower: 0.290,
+  point: 0.55,     // <1 sharpens the canthi into points
+  tilt: 0.085,     // outer canthus rides higher than inner
+};
+
+/**
+ * Upper and lower lid heights at lateral position `u`, in eyeball radii.
+ * `u` is signed so that positive is always toward the OUTER corner.
+ */
+export function apertureBounds(u: number, blink: number): [number, number] {
+  const t = Math.min(1, Math.abs(u) / APERTURE.halfWidth);
+  const w = Math.pow(Math.max(0, 1 - t * t), APERTURE.point);
+  const tilt = APERTURE.tilt * u;
+  const lower = -APERTURE.lower * w + tilt;
+  const upper = APERTURE.upper * w + tilt
+    - blink * (APERTURE.upper + APERTURE.lower) * 1.06;
+  return [lower, upper];
+}
+
+export function insideAperture(u: number, v: number, blink: number): boolean {
+  if (Math.abs(u) > APERTURE.halfWidth) return false;
+  const [lo, hi] = apertureBounds(u, blink);
+  return v >= lo && v <= hi;
+}
+
+/**
+ * The lip seam, as a curve rather than a line: the corners of a mouth sit
+ * markedly higher than the centre, and a straight seam reads as a slot.
+ */
+function seamY(x: number): number {
+  const t = Math.min(1, Math.abs(x) / 0.031);
+  // The corner rise used to be 16 mm, taken from the mesh's own lip crease.
+  // Traced out in bright dots that reads as a fixed grin — the face was
+  // smiling even with every expression AU at zero, which is most of what made
+  // it uncanny. A relaxed mouth is nearly level; 6 mm keeps the corners from
+  // looking downturned without putting a smile on a neutral face.
+  return 1.6537 + 0.0060 * Math.pow(t, 1.8);
+}
+
+/**
+ * The brow ridge. The RPM head carries eyebrows as texture, not geometry, so
+ * on a dot cloud the face had no brows at all — which costs an enormous
+ * amount of expression, since the brow AUs were moving skin nobody could see.
+ * Concentrating and brightening dots along the ridge draws them back in.
+ */
+function browMask(x: number, y: number, z: number): number {
+  const ax = Math.abs(x);
+  if (ax < 0.004 || ax > 0.063 || z < 0.070) return 0;
+  const t = (ax - 0.004) / 0.059;
+  // Pupil centre is y = 1.7261. This puts the ridge 14–22 mm above it; it was
+  // 22–33 mm, which is high enough to read as raised even at rest.
+  // Resting on the lid rather than floating above it. The upper lid reaches
+  // about y = 1.733; a brow much higher than this reads as raised, and a
+  // permanently raised brow is most of what makes a synthetic face look
+  // alarmed.
+  const arch = 1.7385 + 0.0060 * Math.sin(Math.min(1, t) * Math.PI * 0.80);
+  const dy = Math.abs(y - arch);
+  const dz = Math.abs(z - 0.0995);
+  if (dy > 0.0068 || dz > 0.030) return 0;
+  return (1 - dy / 0.0068) * (1 - smoothstep(0.019, 0.030, dz));
+}
+
 type V3 = { x: number; y: number; z: number };
 function v(x: number, y: number, z: number): V3 {
   return { x, y, z };
@@ -165,8 +244,10 @@ export interface FaceRig {
     base: Float32Array;
     normal: Float32Array;
     seed: Float32Array;
-    /** 0 = sclera, 1 = iris, 2 = pupil. Drives colour and brightness. */
+    /** 0 sclera, 1 iris, 2 catchlight, 3 upper lash, 4 lower lash. */
     part: Uint8Array;
+    /** Lateral aperture position — only meaningful for lash dots (3, 4). */
+    apertureU: Float32Array;
     /** 0 = character's left eye, 1 = right. */
     side: Uint8Array;
     count: number;
@@ -200,11 +281,12 @@ const MIN_IMPORTANCE = 0.55;
 
 function importanceAt(x: number, y: number, z: number): number {
   let w = MIN_IMPORTANCE;
-  w = Math.max(w, 1.00 * field(x, y, z, L.mouthCenter, 0.075, 0.040, 0.070));
+  w = Math.max(w, 1.05 * field(x, y, z, L.mouthCenter, 0.054, 0.038, 0.068));
   w = Math.max(w, 0.98 * field(x, y, z, L.eyeL, 0.040, 0.030, 0.045));
   w = Math.max(w, 0.98 * field(x, y, z, L.eyeR, 0.040, 0.030, 0.045));
   w = Math.max(w, 0.82 * field(x, y, z, L.browL, 0.048, 0.024, 0.045));
   w = Math.max(w, 0.82 * field(x, y, z, L.browR, 0.048, 0.024, 0.045));
+  w = Math.max(w, 0.95 * browMask(x, y, z));
   w = Math.max(w, 0.80 * field(x, y, z, L.noseTip, 0.032, 0.048, 0.045));
   w = Math.max(w, 0.66 * field(x, y, z, L.chin, 0.055, 0.045, 0.055));
   return w;
@@ -576,57 +658,86 @@ function buildActionUnits(pts: SampledPoint[]): Record<AUName, AUBasis> {
 /**
  * Eyes get their own cloud so gaze can rotate them without touching the face.
  *
- * The layout matters more than the dot count. These points are drawn with
- * additive blending, which means darkness cannot be drawn — only withheld. A
- * filled disc of lit dots therefore always reads as a headlight, never as an
- * eye. So the pupil is left completely empty, the sclera is a sparse dim
- * scatter, and the dots are concentrated into a bright iris annulus. The
- * result is a dark centre ringed by light, which is what the eye actually
- * looks like and what makes gaze direction legible at this resolution.
+ * Two things govern the layout. First, additive blending can only add light,
+ * never remove it, so a dark pupil has to be an ABSENCE of dots — the budget
+ * goes into a bright iris annulus around an empty centre, with a sparse dim
+ * sclera and a small offset catchlight. Second, the dots are sampled across a
+ * region wider than the visible aperture, because the globe rotates for gaze
+ * and the lid mask that gives the eye its almond shape is applied per frame
+ * rather than baked in.
  *
- * A small offset catchlight sits over the iris. Real eyes always carry one,
- * and its absence is a surprisingly large part of why synthetic eyes look
- * dead.
+ * The lash line is generated in FACE space instead, tracing the aperture
+ * itself. It does not rotate with the eyeball — eyelids stay put while the
+ * eye moves underneath them — and it is what actually makes the eye read as
+ * an oval rather than a circle of light.
  */
 function buildEyes(rng: () => number, perEye: number) {
   const base: number[] = [], normal: number[] = [], seed: number[] = [];
-  const part: number[] = [], side: number[] = [];
+  const part: number[] = [], side: number[] = [], apertureU: number[] = [];
 
   const GOLDEN = 2.399963229728653;
 
-  for (let s = 0; s < 2; s++) {
-    const c = s === 0 ? L.eyeL : L.eyeR;
-    const R = L.eyeRadius;
+  // Slightly wider than the visible opening, so a gaze shift never swings the
+  // iris out into unsampled space.
+  const inSampleZone = (u: number, v: number) => {
+    const t = Math.min(1, Math.abs(u) / 0.99);
+    const w = Math.pow(Math.max(0, 1 - t * t), 0.50);
+    const tilt = APERTURE.tilt * u;
+    return v <= (APERTURE.upper + 0.36) * w + tilt
+        && v >= -(APERTURE.lower + 0.32) * w + tilt;
+  };
 
-    const place = (localR: number, ang: number, pt: number) => {
-      const px = Math.cos(ang) * localR * R;
-      const py = Math.sin(ang) * localR * R;
+  for (let sIdx = 0; sIdx < 2; sIdx++) {
+    const c = sIdx === 0 ? L.eyeL : L.eyeR;
+    const R = L.eyeRadius;
+    // Positive u must mean "toward the outer corner" for both eyes.
+    const outward = sIdx === 0 ? 1 : -1;
+
+    const place = (lx: number, ly: number, pt: number, apU = 0) => {
+      const px = lx * R, py = ly * R;
       const pz = Math.sqrt(Math.max(0, R * R - px * px - py * py));
       base.push(c.x + px, c.y + py, c.z + pz - R * 0.16);
       const nl = Math.hypot(px, py, pz) || 1;
       normal.push(px / nl, py / nl, pz / nl);
       seed.push(rng());
       part.push(pt);
-      side.push(s);
+      side.push(sIdx);
+      apertureU.push(apU);
     };
 
-    // Iris annulus — the bulk of the budget, evenly spread by golden angle.
-    const nIris = Math.round(perEye * 0.62);
-    for (let i = 0; i < nIris; i++) {
-      const t = (i + 0.5) / nIris;
-      place(0.30 + 0.22 * Math.sqrt(t), i * GOLDEN + rng() * 0.15, 1);
+    // Globe: golden-angle spiral, rejected against the sample zone, banded by
+    // radius into iris and sclera. The pupil is simply skipped.
+    let placed = 0;
+    for (let i = 0; placed < perEye && i < perEye * 14; i++) {
+      const t = (i + 0.5) / (perEye * 3.2);
+      const r = Math.min(0.97, 0.20 + 0.80 * Math.sqrt(t % 1));
+      const ang = i * GOLDEN + rng() * 0.12;
+      const lx = Math.cos(ang) * r;
+      const ly = Math.sin(ang) * r;
+      if (!inSampleZone(lx * outward, ly)) continue;
+      if (r < 0.22) continue;                 // pupil stays empty
+      place(lx, ly, r < 0.47 ? 1 : 0);
+      placed++;
     }
 
-    // Sclera — sparse and dim, just enough to give the globe an extent.
-    const nSclera = perEye - nIris - 3;
-    for (let i = 0; i < nSclera; i++) {
-      const t = (i + 0.5) / Math.max(1, nSclera);
-      place(0.62 + 0.32 * Math.sqrt(t), i * GOLDEN + 1.1 + rng() * 0.25, 0);
-    }
-
-    // Catchlight, up and to the character's left.
+    // Catchlight, up and toward the character's outer side.
     for (let i = 0; i < 3; i++) {
-      place(0.30 + i * 0.055, 2.30 + i * 0.30, 2);
+      const ang = (sIdx === 0 ? 2.30 : 0.84) + i * 0.30;
+      place(Math.cos(ang) * (0.30 + i * 0.05), Math.sin(ang) * (0.30 + i * 0.05), 2);
+    }
+
+    // Lash line along the aperture. Denser and brighter on the upper lid,
+    // which is what the eye actually reads from.
+    const N_UP = 22, N_LO = 14;
+    for (let i = 0; i < N_UP; i++) {
+      const u = (i / (N_UP - 1)) * 2 - 1;
+      const uu = u * APERTURE.halfWidth;
+      place(uu * outward, apertureBounds(uu, 0)[1], 3, uu);
+    }
+    for (let i = 0; i < N_LO; i++) {
+      const u = (i / (N_LO - 1)) * 2 - 1;
+      const uu = u * APERTURE.halfWidth * 0.94;
+      place(uu * outward, apertureBounds(uu, 0)[0], 4, uu);
     }
   }
 
@@ -636,6 +747,7 @@ function buildEyes(rng: () => number, perEye: number) {
     seed: new Float32Array(seed),
     part: Uint8Array.from(part),
     side: Uint8Array.from(side),
+    apertureU: new Float32Array(apertureU),
     count: part.length,
   };
 }
@@ -738,6 +850,19 @@ export function buildFaceRig(scene: THREE.Object3D, opts: RigOptions = {}): Face
     if (q.z < bMinZ) bMinZ = q.z;
     if (q.z > bMaxZ) bMaxZ = q.z;
   }
+  /**
+   * Narrow the mouth.
+   *
+   * The RPM mouth is wide for this head, and drawn as lit dots the band reads
+   * wider still — it was the widest feature on the face. Pulling the lip
+   * region toward the midline shortens it for real rather than just trimming
+   * what gets lit, so it stays narrow through jaw opening and every viseme.
+   */
+  const narrowMouth = (q: SampledPoint): number => {
+    const w = field(q.x, q.y, q.z, L.mouthCenter, 0.072, 0.032, 0.062);
+    return q.x * (1 - 0.26 * w);
+  };
+
   const cx = 0;
   const cy = (bMinY + bMaxY) / 2;
   const cz = (bMinZ + bMaxZ) / 2;
@@ -753,15 +878,34 @@ export function buildFaceRig(scene: THREE.Object3D, opts: RigOptions = {}): Face
   for (let i = 0; i < n; i++) {
     const p = kept[i];
     const o = i * 3;
-    base[o] = (p.x - cx) * scale;
+    base[o] = (narrowMouth(p) - cx) * scale;
     base[o + 1] = (p.y - cy) * scale;
     base[o + 2] = (p.z - cz) * scale;
     normal[o] = p.nx; normal[o + 1] = p.ny; normal[o + 2] = p.nz;
     seed[i] = rng();
+
     // The dissolve at the jawline — the head fades out rather than being cut.
     const cut = jawlineY(p.z);
-    alpha[i] = smoothstep(cut - JAW_FADE, cut + 0.008, p.y);
-    feature[i] = importanceAt(p.x, p.y, p.z);
+    let a = smoothstep(cut - JAW_FADE, cut + 0.008, p.y);
+
+    // Eyebrows. The ridge carries no geometry of its own on this asset, so
+    // brightening and fattening the dots along it is what draws brows in.
+    let feat = importanceAt(p.x, p.y, p.z) + browMask(p.x, p.y, p.z) * 0.32;
+
+    // The mouth needs a seam. As with the pupil, the only way to draw a dark
+    // line out of additive dots is to withhold light along it: the dots
+    // sitting on the lip closure are dimmed and the vermillion border just
+    // outside is brightened. That turns a bright smear into a legible mouth,
+    // and it survives the jaw opening because each dot carries its own
+    // treatment with it.
+    if (Math.abs(p.x) < 0.034 && p.z > 0.100) {
+      const dSeam = Math.abs(p.y - seamY(p.x));
+      if (dSeam < 0.0023) a *= 0.07;
+      else if (dSeam < 0.0080) feat += 0.16 * (1 - dSeam / 0.0080);
+    }
+
+    alpha[i] = a;
+    feature[i] = feat;
   }
 
   // Scale every AU delta into the same normalised space.

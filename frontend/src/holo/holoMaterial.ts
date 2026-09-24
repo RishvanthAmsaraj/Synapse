@@ -36,6 +36,13 @@ export interface HoloUniforms {
   uOcclusion: { value: number };
   /** 1 = shaded by the key light, 0 = self-luminous (the eyes). */
   uLit: { value: number };
+  /**
+   * 0 = glow (dots ADD light, for a dark page), 1 = ink (dots are dark marks
+   * that fade by opacity, for a light page). Adding light to white produces
+   * white, so on a light theme the face was mathematically invisible — the
+   * blend mode has to invert along with the palette.
+   */
+  uInk: { value: number };
 }
 
 const VERT = /* glsl */ `
@@ -54,6 +61,7 @@ const VERT = /* glsl */ `
   uniform float uGlitch;
   uniform float uOcclusion;
   uniform float uLit;
+  uniform float uInk;
 
   varying float vBright;
   varying float vFacing;
@@ -156,6 +164,7 @@ const FRAG = /* glsl */ `
   uniform vec3 uDeep;
   uniform float uOpacity;
   uniform float uEnergy;
+  uniform float uInk;
 
   varying float vBright;
   varying float vFacing;
@@ -186,9 +195,35 @@ const FRAG = /* glsl */ `
     float alpha = a * vBright * uOpacity * (0.85 + 0.15 * vSeed);
     if (alpha < 0.004) discard;
 
-    gl_FragColor = vec4(col * (0.55 + 0.75 * vBright), alpha);
+    // In glow mode brightness drives emitted light. In ink mode the dot keeps
+    // its colour and brightness drives coverage instead, so a dim dot fades
+    // toward the page rather than toward black.
+    vec3 lit = col * (0.55 + 0.75 * vBright);
+    gl_FragColor = vec4(mix(lit, col, uInk), mix(alpha, alpha * 0.92, uInk));
   }
 `;
+
+/**
+ * Verify every `uXxx` referenced in a shader is also declared in it.
+ *
+ * GLSL fails the whole program for an undeclared uniform, and three.js just
+ * renders nothing — so a one-line mistake in a shader edit looks identical to
+ * "the feature vanished". This turns that into an error that says what is
+ * wrong.
+ */
+function assertUniformsDeclared(stage: string, src: string, known: Record<string, unknown>) {
+  const declared = new Set(
+    [...src.matchAll(/uniform\s+\w+\s+(u[A-Za-z0-9_]*)\s*;/g)].map((m) => m[1]),
+  );
+  const used = new Set([...src.matchAll(/\bu[A-Z][A-Za-z0-9_]*\b/g)].map((m) => m[0]));
+  const missing = [...used].filter((u) => u in known && !declared.has(u));
+  if (missing.length) {
+    throw new Error(
+      `[holoMaterial] ${stage} shader uses undeclared uniform(s): ${missing.join(', ')}. ` +
+      'Declare them in this stage or the whole program fails to compile and nothing renders.',
+    );
+  }
+}
 
 export function createHoloMaterial(opts: {
   core: string; mid: string; deep: string; size: number; pixelRatio: number;
@@ -208,7 +243,11 @@ export function createHoloMaterial(opts: {
     uGlitch: { value: 0 },
     uOcclusion: { value: 1 },
     uLit: { value: 1 },
+    uInk: { value: 0 },
   };
+
+  assertUniformsDeclared('face vertex', VERT, uniforms as unknown as Record<string, unknown>);
+  assertUniformsDeclared('face fragment', FRAG, uniforms as unknown as Record<string, unknown>);
 
   const mat = new THREE.ShaderMaterial({
     uniforms: uniforms as unknown as Record<string, THREE.IUniform>,
@@ -235,6 +274,7 @@ const EYE_FRAG = /* glsl */ `
   uniform vec3 uDeep;
   uniform float uOpacity;
   uniform float uEnergy;
+  uniform float uInk;
 
   varying float vBright;
   varying float vFacing;
@@ -259,13 +299,16 @@ const EYE_FRAG = /* glsl */ `
     // Banding, brightest first: catchlight, iris ring, then a barely-there
     // sclera. The pupil carries no dots at all — additive blending can only
     // add light, so a dark centre has to be an absence.
-    if (vPart > 1.5)       { col = uCore;  gain = 1.15; }  // catchlight
+    if (vPart > 3.5)       { col = uMid;   gain = 0.40; }  // lower lash
+    else if (vPart > 2.5)  { col = uCore;  gain = 0.80; }  // upper lash
+    else if (vPart > 1.5)  { col = uCore;  gain = 1.15; }  // catchlight
     else if (vPart > 0.5)  { col = uCore;  gain = 0.52; }  // iris ring
-    else                   { col = uMid;   gain = 0.10; }  // sclera
+    else                   { col = uMid;   gain = 0.26; }  // sclera
 
     float alpha = a * vBright * uOpacity * gain * (0.88 + 0.12 * vSeed);
     if (alpha < 0.004) discard;
-    gl_FragColor = vec4(col * (0.6 + 0.8 * vBright), alpha);
+    vec3 lit = col * (0.6 + 0.8 * vBright);
+    gl_FragColor = vec4(mix(lit, col, uInk), alpha);
   }
 `;
 
@@ -297,7 +340,11 @@ export function createEyeMaterial(opts: {
     // skull on a three-quarter turn.
     uOcclusion: { value: 0.88 },
     uLit: { value: 0 },
+    uInk: { value: 0 },
   };
+
+  assertUniformsDeclared('eye vertex', EYE_VERT, uniforms as unknown as Record<string, unknown>);
+  assertUniformsDeclared('eye fragment', EYE_FRAG, uniforms as unknown as Record<string, unknown>);
 
   return new THREE.ShaderMaterial({
     uniforms: uniforms as unknown as Record<string, THREE.IUniform>,

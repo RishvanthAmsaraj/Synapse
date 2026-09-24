@@ -16,10 +16,14 @@
 }
 
 [data-theme='light'] {
-  --holo-core: #ffffff;
-  --holo-mid: #4aa8e8;
-  --holo-deep: #3d55c4;
-  --holo-glow: rgba(74, 168, 232, 0.16);
+  /* Ink, not light: dark marks on paper, with the far side of the head
+     lightening toward the page so depth still reads. */
+  --holo-core: #0d2044;
+  --holo-mid: #24508f;
+  --holo-deep: #93a6cf;
+  /* On a light page a glow cannot brighten anything — the halo has to be a
+     SHADOW instead, or the head has no figure/ground separation at all. */
+  --holo-glow: rgba(28, 46, 92, 0.22);
   --holo-scan: rgba(74, 168, 232, 0.10);
 }
 
@@ -54,6 +58,7 @@
   border-radius: 50%;
   background: radial-gradient(circle at 50% 44%, var(--holo-glow), transparent 68%);
   filter: blur(6px);
+  transition: background 0.3s ease;
   z-index: -1;
 }
 
@@ -84,4 +89,12 @@
 
 @media (prefers-reduced-motion: reduce) {
   .holo-host { will-change: auto; }
+}
+
+/* A wider, softer pool behind the head so the dark dots have something to sit
+   against. Dark mode gets this from the glow itself; light mode does not. */
+[data-theme='light'] .holo-host::before {
+  inset: 2%;
+  filter: blur(14px);
+  opacity: 0.9;
 }
