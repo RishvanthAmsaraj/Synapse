@@ -2,7 +2,7 @@
 // Bundled with esbuild (iife, global HoloLib); three is inlined.
 export * as THREE from 'three';
 export { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-export { buildFaceRig, AU_NAMES } from './faceRig';
+export { buildFaceRig, AU_NAMES, apertureBounds, insideAperture } from './faceRig';
 export type { FaceRig, AUName } from './faceRig';
 export { createHoloMaterial, createEyeMaterial } from './holoMaterial';
 export { AUAnimator, BlinkController, GazeController, Breath, EMOTIONS, fbm } from './expression';
